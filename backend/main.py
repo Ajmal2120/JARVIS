@@ -44,6 +44,7 @@ from brain import proactivity, reflection
 from config import settings
 from jarvis_core import chat as jarvis_chat
 from memory import long_term
+from runtime.runtime import Runtime, set_runtime
 from streaming_patch import apply_streaming_patch
 from tts import speaker
 
@@ -113,6 +114,23 @@ async def lifespan(app: FastAPI):
     # Init DB + seed default rules
     await long_term.init_db()
     await long_term.seed_default_rules()
+
+    # ── JARVIS 3.0 Runtime (outermost shell — starts before all services) ──
+    jarvis_runtime = Runtime()
+    jarvis_runtime.start()
+    logger.info(
+        "JARVIS 3.0 Runtime started (state=%s)",
+        jarvis_runtime.state.value,
+    )
+
+    # ── JARVIS 3.0 Observer (first Operating Intelligence service) ─────────────
+    try:
+        from observer import Observer
+        observer_service = Observer(poll_interval_s=1.0, idle_threshold_s=60.0)
+        jarvis_runtime.register_service(observer_service)
+        logger.info("JARVIS 3.0 Observer registered")
+    except Exception as exc:
+        logger.warning("Observer could not start (continuing without it): %s", exc)
 
     # Configure scheduler
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
@@ -239,8 +257,18 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    if scheduler:
-        scheduler.shutdown(wait=False)
+    try:
+        # ── JARVIS 3.0 Runtime shutdown (outermost shell — stops after all services) ──
+        try:
+            jarvis_runtime.stop()
+            logger.info("JARVIS 3.0 Runtime stopped")
+        except Exception as exc:
+            logger.error("JARVIS 3.0 Runtime shutdown error: %s", exc)
+
+        if scheduler:
+            scheduler.shutdown(wait=False)
+    finally:
+        set_runtime(None)
     logger.info("JARVIS shutdown complete.")
 
 
