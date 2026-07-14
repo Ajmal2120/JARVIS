@@ -101,6 +101,30 @@ ws_manager = WebSocketManager()
 
 
 # -----------------------------------------------------------------------------
+# Inference Engine fallbacks (used only when the Context Engine is unavailable)
+# -----------------------------------------------------------------------------
+
+def _noop_context():
+    """Default Context used when the Context Engine hasn't started."""
+    from context import Context
+    return Context()
+
+
+def _noop_interpretation():
+    """Default ContextInterpretation used when the Context Engine is missing."""
+    from context import ContextInterpretation, InteractionLevel, StabilityLevel
+    return ContextInterpretation(
+        interaction_level=InteractionLevel.IDLE,
+        session_duration_s=0.0,
+        context_stability_s=0.0,
+        context_stability=StabilityLevel.FLUCTUATING,
+        application_switch_frequency=0.0,
+        current_focus_duration_s=0.0,
+        confidence=0.0,
+    )
+
+
+# -----------------------------------------------------------------------------
 # Lifespan: scheduler + initialisation
 # -----------------------------------------------------------------------------
 
@@ -133,6 +157,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Observer could not start (continuing without it): %s", exc)
 
     # ── JARVIS 3.0 Context Engine (subscribes to Observer events) ─────────────
+    context_engine_service = None
     try:
         from context import ContextEngine
         context_engine_service = ContextEngine()
@@ -140,6 +165,26 @@ async def lifespan(app: FastAPI):
         logger.info("JARVIS 3.0 Context Engine registered")
     except Exception as exc:
         logger.warning("Context Engine could not start (continuing without it): %s", exc)
+
+    # ── JARVIS 3.0 Inference Engine (subscribes to Context events) ─────────────
+    try:
+        from inference import InferenceEngine
+        if context_engine_service is not None:
+            inference_engine_service = InferenceEngine(
+                lookup_context=context_engine_service.get_current_context,
+                lookup_interpretation=context_engine_service.get_current_interpretation,
+            )
+        else:
+            # No Context Engine — engine can't evaluate. Register a no-op shim
+            # so the rest of the system can still query for empty hypotheses.
+            inference_engine_service = InferenceEngine(
+                lookup_context=(lambda: _noop_context()),
+                lookup_interpretation=(lambda: _noop_interpretation()),
+            )
+        jarvis_runtime.register_service(inference_engine_service)
+        logger.info("JARVIS 3.0 Inference Engine registered")
+    except Exception as exc:
+        logger.warning("Inference Engine could not start (continuing without it): %s", exc)
 
     # Configure scheduler
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
