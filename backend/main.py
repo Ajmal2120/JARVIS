@@ -132,6 +132,15 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Observer could not start (continuing without it): %s", exc)
 
+    # ── JARVIS 3.0 Context Engine (subscribes to Observer events) ─────────────
+    try:
+        from context import ContextEngine
+        context_engine_service = ContextEngine()
+        jarvis_runtime.register_service(context_engine_service)
+        logger.info("JARVIS 3.0 Context Engine registered")
+    except Exception as exc:
+        logger.warning("Context Engine could not start (continuing without it): %s", exc)
+
     # Configure scheduler
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
 
