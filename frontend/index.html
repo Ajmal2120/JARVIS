@@ -1,0 +1,1524 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>J.A.R.V.I.S.</title>
+  <style>
+    /* ============================================================
+       J.A.R.V.I.S. HUD — Iron Man suit vibes
+       ============================================================ */
+    :root {
+      --bg-0:        #050a14;
+      --bg-1:        #0a1424;
+      --bg-2:        #0e1c30;
+      --line:        rgba(120, 200, 255, 0.18);
+      --line-strong: rgba(120, 200, 255, 0.45);
+      --accent:      #4fc3ff;
+      --accent-2:    #ffb84d;
+      --accent-3:    #6effb8;
+      --text:        #d8eaff;
+      --text-dim:    #88a4c4;
+      --user-bubble: rgba(79, 195, 255, 0.10);
+      --jarvis-glow: 0 0 24px rgba(79, 195, 255, 0.35);
+      --font-ui:     'Segoe UI', system-ui, -apple-system, sans-serif;
+      --font-mono:   'JetBrains Mono', 'Consolas', monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--bg-0);
+      color: var(--text);
+      font-family: var(--font-ui);
+      overflow: hidden;
+      transition: background 0.5s;
+    }
+
+    /* JARVIS AWAKE state - bright accent */
+    body.state-awake {
+      background: linear-gradient(135deg, var(--bg-0) 0%, #0a2535 100%);
+    }
+    body.state-awake .mark {
+      color: #00ff88 !important;
+      text-shadow: 0 0 20px #00ff88, 0 0 40px #00ff88 !important;
+    }
+    body.state-awake .orb {
+      background: radial-gradient(circle, #00ff88 0%, #00aa55 100%) !important;
+      box-shadow: 0 0 30px #00ff88, 0 0 60px #00ff88 !important;
+      animation: orbPulse 1s ease-in-out infinite !important;
+    }
+    body.state-speaking .orb {
+      animation: orbSpeak 0.5s ease-in-out infinite !important;
+    }
+    @keyframes orbPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+    @keyframes orbSpeak {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.15); }
+    }
+
+    /* Animated grid background */
+    body::before {
+      content: "";
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at center, black 0%, transparent 75%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    body::after {
+      content: "";
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse at 20% 10%, rgba(79, 195, 255, 0.06), transparent 60%),
+        radial-gradient(ellipse at 80% 90%, rgba(110, 255, 184, 0.04), transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ---- Layout ---- */
+    .app {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100vh;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    /* ---- Header ---- */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(79, 195, 255, 0.04), transparent);
+      backdrop-filter: blur(6px);
+    }
+    .brand {
+      display: flex; align-items: center; gap: 12px;
+      letter-spacing: 0.3em;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .brand .mark {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      display: grid; place-items: center;
+      color: var(--accent);
+      box-shadow: var(--jarvis-glow);
+      font-family: var(--font-mono);
+      font-weight: 700;
+    }
+    .conn {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.1em;
+    }
+    .conn .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #f55;
+      box-shadow: 0 0 8px #f55;
+      transition: 0.3s;
+    }
+    .conn.connected .dot { background: var(--accent-3); box-shadow: 0 0 10px var(--accent-3); }
+    .conn.authed .dot    { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+    .clock {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 0.1em;
+    }
+
+    /* ---- Main: orb + chat ---- */
+    main {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    /* ---- Orb panel ---- */
+    .orb-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 50% 40%, rgba(79, 195, 255, 0.08), transparent 60%),
+        var(--bg-1);
+    }
+    .orb {
+      width: 180px; height: 180px;
+      border-radius: 50%;
+      position: relative;
+      display: grid; place-items: center;
+      background:
+        radial-gradient(circle at 35% 35%, rgba(255,255,255,0.4), transparent 35%),
+        radial-gradient(circle at 50% 50%, #1a4d80 0%, #0a1424 70%);
+      box-shadow:
+        0 0 40px rgba(79, 195, 255, 0.35),
+        inset 0 0 40px rgba(79, 195, 255, 0.2);
+      transition: box-shadow 0.4s;
+    }
+    .orb::after {
+      content: "";
+      position: absolute; inset: -8px;
+      border-radius: 50%;
+      border: 1px solid var(--accent);
+      opacity: 0.3;
+      animation: orb-pulse 4s ease-in-out infinite;
+    }
+    .orb.thinking {
+      box-shadow: 0 0 60px rgba(255, 184, 77, 0.55),
+                  inset 0 0 50px rgba(255, 184, 77, 0.3);
+    }
+    .orb.thinking::after {
+      border-color: var(--accent-2);
+      animation: orb-spin 2s linear infinite;
+      opacity: 0.6;
+    }
+    .orb.speaking {
+      box-shadow: 0 0 70px rgba(110, 255, 184, 0.55),
+                  inset 0 0 50px rgba(110, 255, 184, 0.3);
+    }
+    .orb.speaking::after {
+      border-color: var(--accent-3);
+      animation: orb-ripple 1s ease-out infinite;
+      opacity: 0.7;
+    }
+    @keyframes orb-pulse {
+      0%, 100% { transform: scale(1); opacity: 0.25; }
+      50%      { transform: scale(1.05); opacity: 0.45; }
+    }
+    @keyframes orb-spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    @keyframes orb-ripple {
+      0%   { transform: scale(1); opacity: 0.7; }
+      100% { transform: scale(1.25); opacity: 0; }
+    }
+
+    .state-label {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.4em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+    .mood-label {
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+    .waveform {
+      width: 100%;
+      height: 50px;
+      display: block;
+    }
+
+    /* ---- Chat ---- */
+    .chat {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--bg-1);
+      min-height: 0;
+    }
+    .chat-thread {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line-strong) transparent;
+    }
+    .chat-thread::-webkit-scrollbar { width: 6px; }
+    .chat-thread::-webkit-scrollbar-thumb {
+      background: var(--line-strong);
+      border-radius: 3px;
+    }
+
+    .msg {
+      max-width: 75%;
+      padding: 12px 16px;
+      border-radius: 14px;
+      line-height: 1.5;
+      font-size: 14.5px;
+      animation: msg-in 0.25s ease-out;
+      word-wrap: break-word;
+    }
+
+    /* Approval card */
+    .approval {
+      max-width: 75%;
+      align-self: stretch;
+      padding: 14px 18px;
+      border: 1px solid var(--accent);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(0,170,255,0.10), rgba(0,170,255,0.02));
+      box-shadow: 0 0 14px rgba(0,170,255,0.20) inset;
+    }
+    .approval .meta { color: var(--accent); font-weight: 700; letter-spacing: 1.5px; font-size: 11px; }
+    .approval .desc { margin: 8px 0 12px; font-size: 14.5px; }
+    .approval .plan { font-family: monospace; font-size: 12px; color: #9bb; opacity: 0.85; white-space: pre-wrap; max-height: 120px; overflow: auto; }
+    .approval .buttons { display: flex; gap: 8px; margin-top: 12px; }
+    .approval button { flex: 1; padding: 8px 0; border-radius: 8px; border: none; cursor: pointer; font-weight: 700; letter-spacing: 1px; font-size: 12px; }
+    .approval .yes { background: #0a8a3a; color: #fff; }
+    .approval .yes:hover { background: #0db34a; }
+    .approval .no  { background: #a52a2a; color: #fff; }
+    .approval .no:hover  { background: #d03a3a; }
+    .approval .resolved { font-size: 12px; color: #9bb; margin-top: 8px; }
+
+    /* Inline image bubble */
+    .msg.image {
+      max-width: 60%;
+      padding: 6px;
+      background: var(--bg-1);
+      border: 1px solid var(--line);
+    }
+    .msg.image img { width: 100%; border-radius: 8px; display: block; cursor: zoom-in; }
+    .msg.image .cap { font-size: 11px; color: #9bb; padding: 6px 8px 4px; }
+    @keyframes msg-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--user-bubble);
+      border: 1px solid rgba(79, 195, 255, 0.25);
+      border-bottom-right-radius: 4px;
+    }
+    .msg.jarvis {
+      align-self: flex-start;
+      background: linear-gradient(135deg, rgba(79, 195, 255, 0.08), rgba(110, 255, 184, 0.04));
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--accent);
+      border-bottom-left-radius: 4px;
+      box-shadow: var(--jarvis-glow);
+    }
+    .msg.proactive {
+      align-self: flex-start;
+      background: linear-gradient(135deg, rgba(255, 184, 77, 0.08), rgba(255, 184, 77, 0.02));
+      border: 1px dashed rgba(255, 184, 77, 0.4);
+      border-left: 3px solid var(--accent-2);
+    }
+    .msg.system {
+      align-self: center;
+      background: transparent;
+      border: 1px dashed var(--line);
+      color: var(--text-dim);
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+    .msg .meta {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .msg .tools {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      margin-top: 8px;
+    }
+    .msg .tool-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 2px 6px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--accent);
+    }
+
+    /* ---- Input ---- */
+    .input-bar {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--line);
+      background: var(--bg-2);
+      border-radius: 0 0 12px 12px;
+    }
+    .input-bar input {
+      flex: 1;
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 10px 18px;
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: 14.5px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-bar input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(79, 195, 255, 0.15);
+    }
+    .btn {
+      width: 42px; height: 42px;
+      border-radius: 50%;
+      border: 1px solid var(--line-strong);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      display: grid; place-items: center;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: rgba(79, 195, 255, 0.1); border-color: var(--accent); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn.recording {
+      background: rgba(255, 85, 85, 0.15);
+      border-color: #f55;
+      color: #f55;
+      animation: rec-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes rec-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 85, 85, 0.5); }
+      50%      { box-shadow: 0 0 0 8px rgba(255, 85, 85, 0); }
+    }
+    .btn.primary {
+      background: var(--accent);
+      color: var(--bg-0);
+      border-color: var(--accent);
+    }
+    .btn.primary:hover { background: #6dd0ff; }
+
+    /* ---- Lock screen ---- */
+    .lock-screen {
+      position: fixed; inset: 0;
+      background: rgba(5, 10, 20, 0.95);
+      backdrop-filter: blur(8px);
+      display: grid;
+      place-items: center;
+      z-index: 100;
+    }
+    .lock-card {
+      width: min(420px, 90vw);
+      padding: 32px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--bg-1);
+      text-align: center;
+    }
+    .lock-card h1 {
+      margin: 0 0 8px;
+      letter-spacing: 0.3em;
+      font-size: 22px;
+    }
+    .lock-card p {
+      color: var(--text-dim);
+      font-size: 13px;
+      margin: 0 0 20px;
+    }
+    .lock-card input {
+      width: 100%;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      text-align: center;
+      letter-spacing: 0.2em;
+    }
+    .lock-card input:focus { border-color: var(--accent); }
+    .lock-card button {
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px;
+      background: var(--accent);
+      color: var(--bg-0);
+      border: 0;
+      border-radius: 8px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      cursor: pointer;
+    }
+    .lock-card .err {
+      color: #ff7b7b;
+      font-size: 12px;
+      margin-top: 10px;
+      min-height: 16px;
+    }
+    .lock-card .lock-orb {
+      width: 80px; height: 80px;
+      margin: 0 auto 16px;
+      border-radius: 50%;
+      border: 2px solid #f55;
+      box-shadow: 0 0 30px rgba(255, 85, 85, 0.4);
+      animation: orb-pulse 2s ease-in-out infinite;
+    }
+
+    /* ---- Toast notifications ---- */
+    .toast-container {
+      position: fixed;
+      bottom: 96px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      padding: 10px 18px;
+      border-radius: 22px;
+      background: rgba(20, 30, 45, 0.92);
+      border: 1px solid var(--line);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      max-width: 80vw;
+    }
+    .toast.visible { opacity: 1; transform: translateY(0); }
+    .toast.info    { border-color: rgba(79, 195, 255, 0.45); color: #cfe9ff; }
+    .toast.ok      { border-color: rgba(80, 220, 140, 0.55); color: #c9f5dd; }
+    .toast.warn    { border-color: rgba(255, 196, 79, 0.55); color: #ffe9b8; }
+    .toast.error   { border-color: rgba(255, 95, 95, 0.55); color: #ffd0d0; }
+  .toast.call-alert {
+    border-color: rgba(255, 80, 80, 0.9);
+    color: #fff;
+    background: rgba(220, 30, 30, 0.25);
+    font-size: 1.1em;
+    padding: 14px 20px;
+    animation: pulse-red 1s infinite;
+  }
+  .toast.call-alert .call-icon { font-size: 1.3em; margin-right: 8px; }
+  @keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 10px rgba(255,80,80,0.5); }
+    50% { box-shadow: 0 0 25px rgba(255,80,80,0.9); }
+  }
+
+    /* ---- Settings ---- */
+    .settings-btn {
+      position: absolute;
+      top: 22px;
+      right: 22px;
+      background: transparent;
+      border: 0;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 18px;
+    }
+    .settings-panel {
+      position: fixed;
+      top: 0; right: -360px;
+      width: 340px;
+      height: 100%;
+      background: var(--bg-1);
+      border-left: 1px solid var(--line-strong);
+      padding: 24px;
+      z-index: 50;
+      transition: right 0.3s;
+      overflow-y: auto;
+    }
+    .settings-panel.open { right: 0; }
+    .settings-panel h3 {
+      letter-spacing: 0.2em;
+      font-size: 13px;
+      color: var(--text-dim);
+      margin: 18px 0 8px;
+    }
+    .settings-panel select, .settings-panel input {
+      width: 100%;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .settings-panel .close-btn {
+      position: absolute;
+      top: 12px; right: 12px;
+      background: transparent;
+      border: 0;
+      color: var(--text-dim);
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    /* ---- Mobile ---- */
+    @media (max-width: 768px) {
+      main { grid-template-columns: 1fr; }
+      .orb-panel { flex-direction: row; padding: 12px; gap: 12px; }
+      .orb { width: 100px; height: 100px; }
+      .waveform { height: 30px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Lock screen: passphrase gate -->
+  <div class="lock-screen" id="lockScreen">
+    <div class="lock-card">
+      <div class="lock-orb"></div>
+      <h1>J.A.R.V.I.S.</h1>
+      <p>Voice identification required.<br>Enter your passphrase to proceed.</p>
+      <input type="password" id="passphraseInput"
+             placeholder="passphrase"
+             autocomplete="off" />
+      <button id="authBtn">UNLOCK</button>
+      <div class="err" id="authErr"></div>
+    </div>
+  </div>
+
+  <!-- Settings panel -->
+  <button class="settings-btn" id="settingsBtn" title="Settings">⚙</button>
+  <div class="settings-panel" id="settingsPanel">
+    <button class="close-btn" id="settingsClose">×</button>
+    <h3 style="margin-top:0">VOICE</h3>
+    <select id="voiceSelect"></select>
+    <h3>VOLUME</h3>
+    <input type="range" id="volumeSlider" min="0" max="100" value="80" />
+    <h3>JARVIS</h3>
+    <div id="jarvisInfo" style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim);">
+      Initialising…
+    </div>
+    <h3 style="margin-top:18px">TRUST</h3>
+    <label style="display:flex; gap:10px; align-items:center; font-size:12px; color:var(--text-dim); cursor:pointer;">
+      <input type="checkbox" id="trustDestructive" />
+      <span>Auto-run destructive actions<br/>(kill, overwrite, shutdown)</span>
+    </label>
+  </div>
+
+  <div class="app">
+    <header>
+      <div class="brand">
+        <div class="mark">J</div>
+        <span>J.A.R.V.I.S.</span>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="conn" id="connStatus">
+        <span class="dot"></span>
+        <span id="connText">OFFLINE</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="orb-panel">
+        <div class="orb" id="orb"></div>
+        <div class="state-label" id="stateLabel">ONLINE</div>
+        <canvas class="waveform" id="waveform"></canvas>
+        <div class="mood-label" id="moodLabel">— NEUTRAL —</div>
+      </section>
+
+      <section class="chat">
+        <div class="chat-thread" id="thread">
+          <div class="msg system">
+            <span class="meta">SYSTEM</span>
+            JARVIS online. Awaiting your command.
+          </div>
+        </div>
+        <div class="input-bar">
+          <input id="userInput" type="text"
+                 placeholder="Speak or type to JARVIS…"
+                 autocomplete="off" />
+          <button class="btn" id="micBtn" title="Voice input">🎙</button>
+          <button class="btn" id="playBtn" title="Play media">🎵</button>
+          <button class="btn" id="ssBtn" title="Take a screenshot">📸</button>
+          <button class="btn" id="activityBtn" title="Activity log">📋</button>
+          <button class="btn primary" id="sendBtn" title="Send">➤</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Toast notifications appear here -->
+  <div class="toast-container" id="toastContainer"></div>
+
+<script>
+'use strict';
+
+/* =====================================================================
+   J.A.R.V.I.S. Frontend
+   ===================================================================== */
+
+// ---------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------
+const BACKEND = (() => {
+  // When opened via file:// the browser gives us empty hostname/port.
+  // Fall back to the local backend so the HUD can reach it.
+  if (location.protocol === 'file:' || !location.hostname) {
+    return {
+      ws:   'ws://127.0.0.1:8000/ws',
+      http: 'http://127.0.0.1:8000',
+    };
+  }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = location.hostname;
+  const port = location.port || '8000';
+  return {
+    ws:      `${proto}://${host}:${port}/ws`,
+    http:    `${location.protocol}//${host}:${port}`,
+  };
+})();
+
+let passphraseSet = false;   // is server expecting a passphrase?
+let passphraseValue = '';    // what user typed
+let ws = null;
+let authed = false;
+let userId = 'default';
+let currentAudio = null;     // currently playing <audio>
+let recording = false;
+let recognition = null;
+let availableVoices = [];
+
+// ---------------------------------------------------------------------
+// DOM helpers
+// ---------------------------------------------------------------------
+const $ = (sel) => document.querySelector(sel);
+const thread    = $('#thread');
+const userInput = $('#userInput');
+const sendBtn   = $('#sendBtn');
+const micBtn    = $('#micBtn');
+const playBtn   = $('#playBtn');
+const orb       = $('#orb');
+const stateLabel= $('#stateLabel');
+const moodLabel = $('#moodLabel');
+const connEl    = $('#connStatus');
+const connText  = $('#connText');
+const clockEl   = $('#clock');
+const lockScreen= $('#lockScreen');
+const ppInput   = $('#passphraseInput');
+const authBtn   = $('#authBtn');
+const authErr   = $('#authErr');
+const voiceSelect = $('#voiceSelect');
+const volumeSlider= $('#volumeSlider');
+const jarvisInfo = $('#jarvisInfo');
+
+// ---------------------------------------------------------------------
+// System info on load
+// ---------------------------------------------------------------------
+async function bootstrap() {
+  try {
+    const r = await fetch(`${BACKEND.http}/health`);
+    const data = await r.json();
+    jarvisInfo.innerHTML = `
+      Version: ${data.version}<br>
+      Timezone: ${data.tz}<br>
+      API key: ${data.configured ? '<span style="color:var(--accent-3)">configured</span>' : '<span style="color:#f55">MISSING</span>'}
+    `;
+    // Voices
+    const vr = await fetch(`${BACKEND.http}/voices`);
+    availableVoices = await vr.json();
+    voiceSelect.innerHTML = Object.entries(availableVoices)
+      .map(([k, v]) => `<option value="${v}"${v.includes('Ryan')?' selected':''}>${k} — ${v}</option>`)
+      .join('');
+  } catch (e) {
+    jarvisInfo.textContent = 'Backend offline.';
+  }
+  // Auth status
+  try {
+    const r = await fetch(`${BACKEND.http}/auth/status`, { method: 'POST' });
+    const d = await r.json();
+    passphraseSet = (d.reason === 'set');
+  } catch (e) { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------
+// Lock screen
+// ---------------------------------------------------------------------
+authBtn.addEventListener('click', tryAuth);
+ppInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryAuth(); });
+
+async function tryAuth() {
+  authErr.textContent = '';
+  passphraseValue = ppInput.value;
+  connectWs();
+}
+
+function showLock(show, errMsg) {
+  lockScreen.style.display = show ? 'grid' : 'none';
+  if (errMsg) authErr.textContent = errMsg;
+  if (show) ppInput.focus();
+}
+
+// ---------------------------------------------------------------------
+// WebSocket lifecycle
+// ---------------------------------------------------------------------
+function connectWs() {
+  setConn('connecting');
+  ws = new WebSocket(BACKEND.ws);
+  ws.onopen = () => {
+    setConn('connected');
+    // Send auth handshake
+    if (!passphraseSet || !passphraseValue) {
+      ws.send(JSON.stringify({ type: 'auth', skip: true }));
+    } else {
+      ws.send(JSON.stringify({ type: 'auth', passphrase: passphraseValue }));
+    }
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    handleWsMessage(msg);
+  };
+  ws.onclose = () => {
+    setConn('offline');
+    authed = false;
+    showLock(true, 'Connection lost. Reconnect to continue.');
+    // Auto-reconnect after 3s
+    setTimeout(connectWs, 3000);
+  };
+  ws.onerror = () => {
+    showLock(true, 'Cannot reach JARVIS backend. Is it running?');
+  };
+}
+
+function setConn(state) {
+  connEl.classList.remove('connected', 'authed');
+  if (state === 'connected') connText.textContent = 'CONNECTING…';
+  if (state === 'authed') {
+    connEl.classList.add('connected', 'authed');
+    connText.textContent = 'AUTHENTICATED';
+  }
+  if (state === 'offline') {
+    connText.textContent = 'OFFLINE';
+  }
+}
+
+function handleWsMessage(msg) {
+  switch (msg.type) {
+    case 'auth_result':
+      if (msg.ok) {
+        authed = true;
+        setConn('authed');
+        showLock(false);
+        addSystem('Access granted. J.A.R.V.I.S. at your service, Sir.');
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission();
+        }
+      } else {
+        authed = false;
+        showLock(true, 'Authentication failed. Try again.');
+      }
+      break;
+    case 'jarvis_reply':
+      setState('idle');
+      // Extract reply text from JSON if needed
+      let replyText = msg.reply;
+      try {
+        if (typeof replyText === 'string' && replyText.trim().startsWith('{')) {
+          const parsed = JSON.parse(replyText);
+          replyText = parsed.reply || parsed.text || replyText;
+        }
+      } catch(e) {}
+      addMessage('jarvis', replyText, { mood: msg.mood, tools: msg.tools_used });
+      break;
+    case 'jarvis_message':
+      addMessage(msg.source === 'proactive' ? 'proactive' : 'jarvis',
+                 msg.content, { mood: msg.mood, timestamp: msg.timestamp });
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('J.A.R.V.I.S.', { body: msg.content.slice(0, 200), silent: false });
+      }
+      break;
+    case 'status':
+      setState(msg.state);
+      break;
+    case 'audio':
+      console.log('Received audio, size:', msg.audio_b64 ? msg.audio_b64.length : 0);
+      playAudio(msg.audio_b64);
+      break;
+    case 'start_voice':
+      // Start voice recognition when triggered from tray
+      startVoiceInput();
+      break;
+    case 'approval_request':
+      addApproval(msg);
+      break;
+    case 'image':
+      addImage(msg);
+      break;
+    case 'toast':
+      showToast(msg.text, msg.kind || 'info');
+      break;
+    case 'call_alert':
+      showCallAlert(msg.caller, msg.message || ('Incoming call from ' + msg.caller));
+      break;
+    case 'error':
+      console.warn('WS error:', msg);
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Sending
+// ---------------------------------------------------------------------
+sendBtn.addEventListener('click', sendMessage);
+userInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+function sendMessage() {
+  if (!authed || !ws || ws.readyState !== 1) return;
+  const text = userInput.value.trim();
+  if (!text) return;
+  addMessage('user', text);
+  userInput.value = '';
+  setState('thinking');
+  ws.send(JSON.stringify({ type: 'user_message', content: text }));
+}
+
+// ---------------------------------------------------------------------
+// Microphone / Web Speech API
+// ---------------------------------------------------------------------
+micBtn.addEventListener('click', toggleMic);
+
+// Keyboard: Enter to send message
+userInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+sendBtn.addEventListener('click', sendMessage);
+
+function toggleMic() {
+  if (recording) {
+    stopMic();
+    return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    alert('Web Speech API not supported in this browser. Try Chrome or Edge.');
+    return;
+  }
+  recognition = new SR();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'en-GB';
+  recognition.onstart = () => {
+    recording = true;
+    micBtn.classList.add('recording');
+    setState('listening');
+  };
+  recognition.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    userInput.value = text;
+    sendMessage();
+  };
+  recognition.onerror = (e) => {
+    console.warn('Recognition error:', e.error);
+    stopMic();
+  };
+  recognition.onend = stopMic;
+  recognition.start();
+}
+
+function setState(state) {
+  const stateLabel = document.getElementById('stateLabel');
+  const body = document.body;
+
+  // Clear previous state classes
+  body.classList.remove('state-idle', 'state-listening', 'state-awake', 'state-speaking');
+
+  // Set new state
+  switch(state) {
+    case 'idle':
+      stateLabel.textContent = 'ONLINE';
+      break;
+    case 'listening':
+      stateLabel.textContent = 'LISTENING';
+      break;
+    case 'awake':
+      stateLabel.textContent = 'AWAKE';
+      body.classList.add('state-awake');
+      break;
+    case 'speaking':
+      stateLabel.textContent = 'SPEAKING';
+      body.classList.add('state-speaking');
+      break;
+  }
+}
+
+function stopMic() {
+  recording = false;
+  micBtn.classList.remove('recording');
+  if (recognition) {
+    try { recognition.stop(); } catch {}
+    recognition = null;
+  }
+  if (stateLabel.textContent === 'LISTENING') setState('idle');
+}
+
+// ---------------------------------------------------------------------
+// TTS playback + waveform
+// ---------------------------------------------------------------------
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let analyser = null;
+let waveformAnimId = null;
+const waveCanvas = document.getElementById('waveform');
+const waveCtx = waveCanvas.getContext('2d');
+
+function setupWaveform() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = waveCanvas.clientWidth;
+  const h = waveCanvas.clientHeight;
+  waveCanvas.width = w * dpr;
+  waveCanvas.height = h * dpr;
+  waveCtx.scale(dpr, dpr);
+}
+
+function playAudio(b64) {
+  if (!b64) return;
+  if (currentAudio) { try { currentAudio.pause(); } catch {} }
+  try {
+    const bytes = atob(b64);
+    const buf = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+    const blob = new Blob([buf], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.volume = (parseInt(volumeSlider.value) || 80) / 100;
+    currentAudio = audio;
+
+    // Resume audio context (browser requires user gesture first time)
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    // Visualise
+    try {
+      const source = audioCtx.createMediaElementSource(audio);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyser.connect(audioCtx.destination);
+      drawWaveform();
+    } catch(e) {}
+
+    setState('speaking');
+    audio.onended = () => {
+      setState('idle');
+      URL.revokeObjectURL(url);
+    };
+    audio.onerror = (e) => console.warn('Audio error:', e);
+    audio.play().then(() => console.log('Playing...')).catch(e => {
+      console.warn('Audio play failed:', e);
+      // Browser blocked? Try after user click
+      document.addEventListener('click', () => audio.play().catch(() => {}), { once: true });
+    });
+  } catch(e) { console.error('TTS error:', e); }
+}
+
+function drawWaveform() {
+  if (!analyser) return;
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  const draw = () => {
+    waveformAnimId = requestAnimationFrame(draw);
+    analyser.getByteTimeDomainData(data);
+    const w = waveCanvas.clientWidth;
+    const h = waveCanvas.clientHeight;
+    waveCtx.clearRect(0, 0, w, h);
+    waveCtx.strokeStyle = 'rgba(110, 255, 184, 0.9)';
+    waveCtx.lineWidth = 1.5;
+    waveCtx.beginPath();
+    const slice = w / data.length;
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i] / 128.0;
+      const y = (v * h) / 2;
+      if (i === 0) waveCtx.moveTo(0, y);
+      else waveCtx.lineTo(i * slice, y);
+    }
+    waveCtx.stroke();
+  };
+  draw();
+}
+
+// ---------------------------------------------------------------------
+// State machine + clock
+// ---------------------------------------------------------------------
+function setState(state) {
+  orb.classList.remove('thinking', 'speaking');
+  if (state === 'thinking') {
+    orb.classList.add('thinking');
+    stateLabel.textContent = 'THINKING';
+  } else if (state === 'speaking') {
+    orb.classList.add('speaking');
+    stateLabel.textContent = 'SPEAKING';
+  } else if (state === 'listening') {
+    stateLabel.textContent = 'LISTENING';
+  } else {
+    stateLabel.textContent = authed ? 'ONLINE' : 'STANDBY';
+  }
+}
+
+function tickClock() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  clockEl.textContent =
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// ---------------------------------------------------------------------
+// Chat thread
+// ---------------------------------------------------------------------
+function addMessage(role, content, opts = {}) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  let meta = '';
+  if (role === 'jarvis') meta = 'JARVIS';
+  else if (role === 'user') meta = 'YOU';
+  else if (role === 'proactive') meta = 'JARVIS · PROACTIVE';
+  else if (role === 'system') meta = 'SYSTEM';
+  let html = '';
+  if (meta) html += `<span class="meta">${meta}${opts.timestamp ? ' · ' + formatTime(opts.timestamp) : ''}</span>`;
+  html += escapeHtml(content);
+  if (opts.tools && opts.tools.length) {
+    html += '<div class="tools">' +
+      opts.tools.map(t => `<span class="tool-tag">${escapeHtml(t)}</span>`).join('') +
+      '</div>';
+  }
+  div.innerHTML = html;
+  thread.appendChild(div);
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function addSystem(text) {
+  addMessage('system', text);
+}
+
+// ---------------------------------------------------------------------
+// Approval card (dry-run → user clicks yes/no)
+// ---------------------------------------------------------------------
+function addApproval(msg) {
+  const div = document.createElement('div');
+  div.className = 'approval';
+  const planStr = JSON.stringify(msg.plan || {}, null, 2);
+  div.innerHTML = `
+    <span class="meta">⚠ APPROVAL REQUESTED · ${escapeHtml(msg.tool)}</span>
+    <div class="desc">${escapeHtml(msg.description || '')}</div>
+    <pre class="plan">${escapeHtml(planStr)}</pre>
+    <div class="buttons">
+      <button class="yes">✓ APPROVE</button>
+      <button class="no">✗ DENY</button>
+    </div>
+  `;
+  thread.appendChild(div);
+  thread.scrollTop = thread.scrollHeight;
+  const yes = div.querySelector('.yes');
+  const no  = div.querySelector('.no');
+  async function send(approved) {
+    yes.disabled = true; no.disabled = true;
+    yes.textContent = approved ? '✓ APPROVED' : '✗ DENIED';
+    no.style.display = approved ? 'none' : 'inline-block';
+    try {
+      await fetch(`${BACKEND.http}/approve/${msg.action_id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved, reason: '' }),
+      });
+    } catch (e) {
+      console.warn('approve POST failed:', e);
+    }
+    const r = document.createElement('div');
+    r.className = 'resolved';
+    r.textContent = approved ? 'Sent to JARVIS — running now…' : 'Sent to JARVIS — action skipped.';
+    div.appendChild(r);
+  }
+  yes.addEventListener('click', () => send(true));
+  no.addEventListener('click',  () => send(false));
+}
+
+// ---------------------------------------------------------------------
+// Inline image (e.g. screenshot)
+// ---------------------------------------------------------------------
+function addImage(msg) {
+  const div = document.createElement('div');
+  div.className = 'msg image';
+  div.innerHTML = `
+    <img src="${msg.src}" alt="${escapeHtml(msg.filename || 'screenshot')}"
+         onclick="window.open(this.src, '_blank')" />
+    <div class="cap">${escapeHtml(msg.filename || '')}${msg.path ? ' · ' + escapeHtml(msg.path) : ''}</div>
+  `;
+  thread.appendChild(div);
+  thread.scrollTop = thread.scrollHeight;
+}
+
+// ---------------------------------------------------------------------
+// Quick-action buttons
+// ---------------------------------------------------------------------
+const ssBtn = $('#ssBtn');
+ssBtn.addEventListener('click', async () => {
+  if (!authed) return;
+  ssBtn.disabled = true;
+  try {
+    await fetch(`${BACKEND.http}/screenshot`, { method: 'POST' });
+  } catch (e) {
+    console.warn('screenshot failed:', e);
+  }
+  ssBtn.disabled = false;
+});
+
+const activityBtn = $('#activityBtn');
+activityBtn.addEventListener('click', async () => {
+  if (!authed) return;
+  try {
+    const r = await fetch(`${BACKEND.http}/activity?limit=20`);
+    const items = await r.json();
+    if (!items.length) {
+      addSystem('Activity log is empty, Sir.');
+      return;
+    }
+    const lines = items.map(it =>
+      `· ${it.timestamp}  [${it.status.toUpperCase()}]  ${it.kind}` +
+      (it.target ? `  →  ${it.target}` : '') +
+      (it.detail ? `  (${it.detail})` : '')
+    );
+    addSystem('Recent activity:\n' + lines.join('\n'));
+  } catch (e) {
+    console.warn('activity fetch failed:', e);
+  }
+});
+
+// Quick-play button: prompts for a song then plays it via /media/play
+playBtn.addEventListener('click', async () => {
+  if (!authed) return;
+  const q = (userInput.value || prompt('Play what, Sir?', '')).trim();
+  if (!q) return;
+  userInput.value = '';
+  addMessage('user', `🎵 ${q}`);
+  try {
+    await fetch(`${BACKEND.http}/media/play`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q }),
+    });
+  } catch (e) {
+    showToast('Play failed: ' + e, 'error');
+  }
+});
+
+// Trust destructive actions toggle
+const trustChk = $('#trustDestructive');
+if (trustChk) {
+  // Load current value
+  fetch(`${BACKEND.http}/settings/trust-destructive`)
+    .then(r => r.json())
+    .then(d => { trustChk.checked = !!d.enabled; })
+    .catch(() => {});
+  trustChk.addEventListener('change', async () => {
+    try {
+      await fetch(`${BACKEND.http}/settings/trust-destructive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: trustChk.checked }),
+      });
+      showToast(
+        trustChk.checked
+          ? '⚠ Destructive actions will run without approval.'
+          : 'Destructive actions require approval again.',
+        trustChk.checked ? 'warn' : 'info',
+      );
+    } catch (e) {
+      showToast('Setting failed: ' + e, 'error');
+    }
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+function formatTime(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
+
+// ---------------------------------------------------------------------
+// Toast notifications
+// ---------------------------------------------------------------------
+const toastContainer = $('#toastContainer');
+function showToast(text, kind = 'info', ms = 3500) {
+  if (!toastContainer) return;
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.textContent = text;
+  toastContainer.appendChild(el);
+  // Force reflow then show
+  requestAnimationFrame(() => el.classList.add('visible'));
+  setTimeout(() => {
+    el.classList.remove('visible');
+    setTimeout(() => el.remove(), 250);
+  }, ms);
+}
+
+// ---------------------------------------------------------------------
+// Call Alert
+// ---------------------------------------------------------------------
+function showCallAlert(caller, message) {
+  // Show prominent call alert
+  const el = document.createElement('div');
+  el.className = 'toast call-alert';
+  el.innerHTML = `<span class="call-icon">📞</span> ${message}`;
+  toastContainer.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('visible'));
+  // Add to chat
+  addMessage('jarvis', message, 'call');
+  // Play ringtone sound
+  try {
+    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleSc');
+    audio.volume = 0.8;
+    audio.play().catch(() => {});
+  } catch(e) {}
+  setTimeout(() => {
+    el.classList.remove('visible');
+    setTimeout(() => el.remove(), 250);
+  }, 15000); // stay longer for call alerts
+}
+
+// ---------------------------------------------------------------------
+// Settings panel
+// ---------------------------------------------------------------------
+$('#settingsBtn').addEventListener('click', () => {
+  $('#settingsPanel').classList.add('open');
+});
+$('#settingsClose').addEventListener('click', () => {
+  $('#settingsPanel').classList.remove('open');
+});
+
+// ---------------------------------------------------------------------
+// Voice Recognition - JARVIS Assistant Mode (Native + Hybrid)
+// ---------------------------------------------------------------------
+let isListening = false;
+let jarvisAwake = false;  // True after wake word, stays awake until "sleep"
+let recognizer = null;
+let nativeVoiceEnabled = false;  // Whether native voice is available
+let voicePollInterval = null;   // For checking native voice status
+
+// Check native voice support on startup
+async function checkNativeVoice() {
+  try {
+    const r = await fetch(`${BACKEND.http}/voice/status`);
+    if (r.ok) {
+      const status = await r.json();
+      nativeVoiceEnabled = status.running || status.listening;
+      console.log('Native voice status:', status);
+      return status;
+    }
+  } catch(e) {
+    console.log('Native voice not available');
+  }
+  return null;
+}
+
+// Start native voice via backend
+async function startNativeVoice() {
+  try {
+    const r = await fetch(`${BACKEND.http}/voice/control`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start' })
+    });
+    const result = await r.json();
+    if (result.ok) {
+      nativeVoiceEnabled = true;
+      showToast('JARVIS native voice activated', 'ok');
+      return true;
+    }
+  } catch(e) {
+    console.warn('Failed to start native voice:', e);
+  }
+  return false;
+}
+
+function startVoiceInput() {
+  if (isListening) return;
+
+  // Try native voice first
+  checkNativeVoice().then(status => {
+    if (status && status.running) {
+      isListening = true;
+      setState('listening');
+      showToast('JARVIS is listening via native voice. Say "JARVIS" to activate', 'info');
+      // Start polling for status updates
+      startVoicePolling();
+      return;
+    }
+
+    // Fallback to browser Web Speech API
+    startBrowserVoice();
+  });
+}
+
+function startBrowserVoice() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showToast('Speech recognition not supported in this browser. Try Chrome or Edge.', 'error');
+    return;
+  }
+
+  recognizer = new SpeechRecognition();
+  recognizer.continuous = true;
+  recognizer.interimResults = false;
+  recognizer.lang = 'en-US';
+  recognizer.onresult = (event) => {
+    const transcript = event.results[event.results.length-1][0].transcript.trim();
+    const lower = transcript.toLowerCase();
+    console.log('VOICE:', transcript);
+
+    // Check for wake words (always listening for these)
+    if (!jarvisAwake && (lower.includes('jarvis') || lower.includes('wake up'))) {
+      jarvisAwake = true;
+      setState('awake');
+      showToast('JARVIS activated - I\'m listening', 'info');
+
+      // Extract command after wake word
+      let command = transcript
+        .replace(/jarvis[,\s]*/gi, '')
+        .replace(/wake up[,\s]*/gi, '')
+        .replace(/daddy's home/gi, '')
+        .replace(/^[,.\s]+/, '')
+        .trim();
+
+      if (command) {
+        addMessage('user', command);
+        ws.send(JSON.stringify({ type: 'user_message', content: command }));
+      }
+      return;
+    }
+
+    // Check for sleep command
+    if (jarvisAwake && (lower.includes('sleep') || lower.includes('goodnight') || lower.includes('stop listening'))) {
+      jarvisAwake = false;
+      setState('idle');
+      showToast('JARVIS going to sleep. Say "JARVIS" to wake me.', 'info');
+      addMessage('jarvis', 'Goodnight, Sir. I\'ll be here when you need me.', 'text');
+      return;
+    }
+
+    // While awake, send everything to JARVIS (no need to repeat wake word)
+    if (jarvisAwake && transcript) {
+      addMessage('user', transcript);
+      ws.send(JSON.stringify({ type: 'user_message', content: transcript }));
+    }
+  };
+  recognizer.onerror = (e) => {
+    if (e.error !== 'no-speech' && e.error !== 'aborted') {
+      console.warn('Speech error:', e.error);
+    }
+  };
+  recognizer.onend = () => {
+    if (isListening) {
+      try { recognizer.start(); } catch {}
+    }
+  };
+  recognizer.start();
+  isListening = true;
+  setState('listening');
+  showToast('JARVIS is listening (browser mode). Say "JARVIS" or "wake up" to activate', 'info');
+}
+
+function startVoicePolling() {
+  // Poll for native voice status
+  if (voicePollInterval) clearInterval(voicePollInterval);
+  voicePollInterval = setInterval(async () => {
+    const status = await checkNativeVoice();
+    if (status && status.listening && !isListening) {
+      setState('listening');
+      isListening = true;
+    } else if (status && !status.listening && isListening) {
+      setState('idle');
+      isListening = false;
+    }
+  }, 2000);
+}
+
+function stopVoiceInput() {
+  isListening = false;
+  jarvisAwake = false;
+
+  // Stop browser voice
+  if (recognizer) {
+    try { recognizer.stop(); } catch {}
+    recognizer = null;
+  }
+
+  // Stop native voice polling
+  if (voicePollInterval) {
+    clearInterval(voicePollInterval);
+    voicePollInterval = null;
+  }
+
+  // Try to stop native voice
+  fetch(`${BACKEND.http}/voice/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'stop' })
+  }).catch(() => {});
+
+  setState('idle');
+  nativeVoiceEnabled = false;
+}
+
+// ---------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------
+window.addEventListener('resize', setupWaveform);
+setupWaveform();
+bootstrap();
+
+// Check native voice status on load
+checkNativeVoice().then(status => {
+  if (status && status.running) {
+    nativeVoiceEnabled = true;
+    console.log('Native voice already running');
+  }
+});
+
+// Start JARVIS in listening mode automatically (try native first, fallback to browser)
+setTimeout(() => {
+  if (!nativeVoiceEnabled) {
+    startVoiceInput();
+  }
+}, 1500);  // Start after page loads
+</script>
+</body>
+</html>
+

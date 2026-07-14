@@ -1,0 +1,68 @@
+# ------------------------
+# Claude
+# ------------------------
+.claude/
+
+# ------------------------
+# Python
+# ------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# ------------------------
+# Virtual Environments
+# ------------------------
+.venv/
+.venv(3.13)/
+backend/.venv/
+
+# ------------------------
+# Environment Variables
+# ------------------------
+.env
+backend/.env
+
+# ------------------------
+# Logs
+# ------------------------
+logs/
+*.log
+
+# ------------------------
+# AI Models
+# ------------------------
+models/
+backend/voice/model/
+backend/kokoro/*.onnx
+backend/kokoro/*.bin
+
+# ------------------------
+# Browser Data
+# ------------------------
+backend/data/whatsapp_profile/
+
+# ------------------------
+# Test / Benchmark Files
+# ------------------------
+tester.py
+test_jarvis_pipeline.py
+time_jarvis_pipeline.py
+backend/test_embedded_tts.py
+backend/tts_test.py
+backend/benchmark_beam.py
+bench_audio.wav
+
+# ------------------------
+# IDE
+# ------------------------
+.vscode/
+.idea/
+
+# ------------------------
+# OS
+# ------------------------
+Thumbs.db
+.DS_Store

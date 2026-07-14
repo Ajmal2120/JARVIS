@@ -1,0 +1,1 @@
+"""JARVIS notifications — Windows toast and browser notification dispatcher."""

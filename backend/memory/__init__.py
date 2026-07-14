@@ -1,0 +1,1 @@
+"""JARVIS memory modules — long-term SQLite and short-term buffers."""

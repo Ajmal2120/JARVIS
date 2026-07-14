@@ -1,0 +1,1 @@
+"""JARVIS authentication — passphrase/PIN gate (Phase 1). Voice biometrics in Phase 2."""

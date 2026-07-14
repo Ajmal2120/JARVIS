@@ -1,0 +1,36 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+anthropic>=0.39.0
+google-generativeai>=0.8.0  # Gemini support (optional, set LLM_PROVIDER=gemini)
+duckduckgo-search>=6.1.7
+feedparser>=6.0.11
+APScheduler>=3.11.0
+aiosqlite>=0.19.0
+python-dotenv>=1.0.1
+aiofiles>=23.2.1
+python-multipart>=0.0.9
+pyautogui>=0.9.54
+winotify>=1.1.0
+websockets>=12.0
+pydantic>=2.6.0
+Pillow>=10.0.0
+pyperclip>=1.8.2
+pypdf>=6.14.2
+pystray>=0.19.5
+keyboard>=0.13.5
+pywin32>=306
+psutil>=6.0.0
+httpx>=0.25.0
+# Audio / Speech
+faster-whisper>=1.0.0
+silero-vad>=5.0
+kokoro-onnx>=0.4.0
+sounddevice>=0.5.0
+numpy>=1.24.0
+# WhatsApp
+whatsapp-web.py>=0.1.0
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+# Windows-only
+pycaw>=20230407; sys_platform == 'win32'
+comtypes>=1.2.0; sys_platform == 'win32'
