@@ -26,10 +26,16 @@ class ObserverEvent:
     Every concrete event includes the full system snapshot at the moment
     the change was detected. This is cheap — the snapshot is a shallow
     dict of strings and ints, rebuilt only when something actually changes.
+
+    `confidence` reflects how certain the observation is:
+        - 1.0 for deterministic OS API reads (current Observer sources)
+        - Lower values for probabilistic observations (vision, OCR,
+          activity inference) added in later phases
     """
 
     type: str = "observer"
     snapshot: dict = field(default_factory=dict)
+    confidence: float = 1.0
 
 
 @dataclass(frozen=True)
