@@ -44,6 +44,7 @@ from observer.events import (
 )
 
 from .context import Context
+from .interpreter import ContextInterpretation, ContextInterpreter
 
 logger = logging.getLogger("jarvis.context")
 
@@ -57,6 +58,7 @@ class ContextEngine:
         self._context = Context()
         self._lock = threading.Lock()
         self._unsubscribe: Callable[[], None] | None = None
+        self._interpreter = ContextInterpreter(lookup_context=self._get_context_snapshot)
 
     # ------------------------------------------------------------------ #
     # RuntimeService interface                                            #
@@ -66,10 +68,12 @@ class ContextEngine:
         """Subscribe to Observer events on the Runtime EventBus."""
         runtime = get_runtime()
         self._unsubscribe = runtime.event_bus.subscribe(self._on_event)
+        self._interpreter.start()
         logger.info("context_engine: started, subscribed to EventBus")
 
     def stop(self) -> None:
         """Unsubscribe from the EventBus."""
+        self._interpreter.stop()
         if self._unsubscribe:
             self._unsubscribe()
             self._unsubscribe = None
@@ -150,3 +154,19 @@ class ContextEngine:
                 confidence=self._context.confidence,
                 last_updated=self._context.last_updated,
             )
+
+    def _get_context_snapshot(self) -> Context:
+        """Pass-through for the Interpreter's lookup callable.
+
+        The Interpreter never holds a reference to the Context Engine;
+        it asks for a fresh snapshot each time it needs one.
+        """
+        return self.get_current_context()
+
+    def get_current_interpretation(self) -> "ContextInterpretation":
+        """Return the current ContextInterpretation.
+
+        Delegates to the owned ContextInterpreter. Returns a fresh
+        immutable snapshot on each call.
+        """
+        return self._interpreter.get_current_interpretation()
