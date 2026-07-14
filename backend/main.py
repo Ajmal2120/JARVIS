@@ -186,6 +186,26 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Inference Engine could not start (continuing without it): %s", exc)
 
+    # ── JARVIS 3.0 Cognitive Logger (passive EventBus observer) ───────────────
+    try:
+        from observability import CognitiveLogger
+        _cognitive_logger = CognitiveLogger()
+        # Bind to the live services for richer structured entries.
+        if context_engine_service is not None:
+            _cognitive_logger.bind(
+                get_context=context_engine_service.get_current_context,
+                get_interpretation=context_engine_service.get_current_interpretation,
+                get_hypotheses=(
+                    inference_engine_service.get_current_hypotheses
+                    if inference_engine_service is not None
+                    else None
+                ),
+            )
+        jarvis_runtime.register_service(_cognitive_logger)
+        logger.info("JARVIS 3.0 Cognitive Logger registered")
+    except Exception as exc:
+        logger.warning("Cognitive Logger could not start: %s", exc)
+
     # Configure scheduler
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
 

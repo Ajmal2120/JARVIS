@@ -48,6 +48,10 @@ class Settings:
     PROACTIVITY_TICK_MINUTES: int = int(os.getenv("PROACTIVITY_TICK_MINUTES", "15"))
     REFLECTION_INTERVAL_HOURS: int = int(os.getenv("REFLECTION_INTERVAL_HOURS", "6"))
 
+    # --- Cognitive Logging ---
+    ENABLE_COGNITIVE_LOGGING: bool = os.getenv("ENABLE_COGNITIVE_LOGGING", "true").lower() == "true"
+    COGNITIVE_LOG_PATH: Path = BACKEND_DIR / "logs" / "cognitive.log"
+
 
     # --- Server ---
     HOST: str = os.getenv("HOST", "127.0.0.1")
