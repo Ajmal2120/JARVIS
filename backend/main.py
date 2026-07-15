@@ -129,11 +129,13 @@ def _noop_interpretation():
 # -----------------------------------------------------------------------------
 
 scheduler: Optional[AsyncIOScheduler] = None
+main_suggestion_engine = None
+main_ws_bridge: dict = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global scheduler
+    global scheduler, main_suggestion_engine, main_ws_bridge
 
     # Init DB + seed default rules
     await long_term.init_db()
@@ -270,6 +272,118 @@ async def lifespan(app: FastAPI):
         logger.info("JARVIS 3.0 Suggestion Engine registered")
     except Exception as exc:
         logger.warning("Suggestion Engine could not start (continuing without it): %s", exc)
+
+    # ── JARVIS 3.0 WebSocket bridge: EventBus → Frontend ─────────────────────
+    # Bridges sync EventBus events (from the Operating Intelligence
+    # pipeline) to async WebSocket broadcasts.  The Runtime's EventBus
+    # publishes synchronously from its own thread, so we must use
+    # asyncio.run_coroutine_threadsafe() to schedule the broadcast on
+    # the FastAPI event loop.
+    try:
+        import asyncio as _asyncio
+
+        def _on_suggestion_created(event) -> None:
+            """Publish a suggestion_available message to all WS clients."""
+            try:
+                payload = {
+                    "type": "suggestion_available",
+                    "suggestion_id": getattr(event, "suggestion_id", ""),
+                    "title": getattr(event, "title", ""),
+                    "message": "",  # message set after ask()
+                    "provider": getattr(event, "provider", ""),
+                    "confidence": getattr(event, "confidence", 0.0),
+                    "cycle_id": getattr(event, "cycle_id", ""),
+                }
+                _asyncio.run_coroutine_threadsafe(
+                    ws_manager.broadcast(payload),
+                    _asyncio.get_event_loop(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS bridge: suggestion_created failed: %s", exc)
+
+        def _on_suggestion_asked(event) -> None:
+            """Update the frontend with the message ready to speak."""
+            try:
+                payload = {
+                    "type": "suggestion_available",
+                    "suggestion_id": getattr(event, "suggestion_id", ""),
+                    "title": "",
+                    "message": getattr(event, "message", ""),
+                    "provider": "",
+                    "confidence": 0.0,
+                    "cycle_id": getattr(event, "cycle_id", ""),
+                }
+                _asyncio.run_coroutine_threadsafe(
+                    ws_manager.broadcast(payload),
+                    _asyncio.get_event_loop(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS bridge: suggestion_asked failed: %s", exc)
+
+        def _on_suggestion_accepted(event) -> None:
+            try:
+                payload = {
+                    "type": "suggestion_accepted",
+                    "suggestion_id": getattr(event, "suggestion_id", ""),
+                    "provider": getattr(event, "provider", ""),
+                    "cycle_id": getattr(event, "cycle_id", ""),
+                }
+                _asyncio.run_coroutine_threadsafe(
+                    ws_manager.broadcast(payload),
+                    _asyncio.get_event_loop(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS bridge: suggestion_accepted failed: %s", exc)
+
+        def _on_suggestion_declined(event) -> None:
+            try:
+                payload = {
+                    "type": "suggestion_declined",
+                    "suggestion_id": getattr(event, "suggestion_id", ""),
+                    "cycle_id": getattr(event, "cycle_id", ""),
+                }
+                _asyncio.run_coroutine_threadsafe(
+                    ws_manager.broadcast(payload),
+                    _asyncio.get_event_loop(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS bridge: suggestion_declined failed: %s", exc)
+
+        def _on_suggestion_expired(event) -> None:
+            try:
+                payload = {
+                    "type": "suggestion_expired",
+                    "suggestion_id": getattr(event, "suggestion_id", ""),
+                    "cycle_id": getattr(event, "cycle_id", ""),
+                }
+                _asyncio.run_coroutine_threadsafe(
+                    ws_manager.broadcast(payload),
+                    _asyncio.get_event_loop(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS bridge: suggestion_expired failed: %s", exc)
+
+        # Subscribe to the EventBus for suggestion lifecycle events.
+        jarvis_runtime.event_bus.subscribe(_on_suggestion_created)
+        jarvis_runtime.event_bus.subscribe(_on_suggestion_asked)
+        jarvis_runtime.event_bus.subscribe(_on_suggestion_accepted)
+        jarvis_runtime.event_bus.subscribe(_on_suggestion_declined)
+        jarvis_runtime.event_bus.subscribe(_on_suggestion_expired)
+
+        # Store references so the WS endpoint can call accept/decline.
+        main_suggestion_engine = suggestion_engine_service
+        main_ws_bridge = {
+            "suggestion_created": _on_suggestion_created,
+            "suggestion_asked": _on_suggestion_asked,
+            "suggestion_accepted": _on_suggestion_accepted,
+            "suggestion_declined": _on_suggestion_declined,
+            "suggestion_expired": _on_suggestion_expired,
+        }
+        logger.info("JARVIS 3.0 WebSocket bridge registered")
+    except Exception as exc:
+        logger.warning("WS bridge could not start: %s", exc)
+        main_suggestion_engine = None
+        main_ws_bridge = {}
 
     # Configure scheduler
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
@@ -1088,6 +1202,13 @@ async def ws_endpoint(websocket: WebSocket):
                 # Fire and forget — reply goes out instantly, audio follows
                 asyncio.create_task(_generate_tts(websocket, res["reply"], res.get("mood", "neutral")))
 
+            # --- Suggestion accept/decline (JARVIS 3.0 proactive) ---
+            elif mtype == "accept_suggestion":
+                await _handle_accept_suggestion(websocket, msg)
+
+            elif mtype == "decline_suggestion":
+                await _handle_decline_suggestion(websocket, msg)
+
             elif mtype == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
 
@@ -1102,6 +1223,125 @@ async def ws_endpoint(websocket: WebSocket):
         logger.exception("WS error: %s", e)
     finally:
         await ws_manager.disconnect(websocket)
+
+
+# -----------------------------------------------------------------------------
+# JARVIS 3.0 — Suggestion handlers (Sprint 1: First Autonomous Conversation)
+# -----------------------------------------------------------------------------
+
+async def _handle_accept_suggestion(
+    websocket: WebSocket,
+    msg: dict,
+) -> None:
+    """Accept a pending Suggestion, execute via LLM, and reply."""
+    suggestion_id = (msg.get("suggestion_id") or "").strip()
+    if not suggestion_id:
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "error": "missing_suggestion_id",
+        }))
+        return
+
+    engine = main_suggestion_engine
+    if engine is None:
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "error": "suggestion_engine_unavailable",
+        }))
+        return
+
+    # Mark the suggestion as ASKED (transitions to user-facing state)
+    # then accept it (transitions to ACCEPTED).  Both are no-ops if
+    # the suggestion no longer exists.
+    engine.ask()
+
+    # Tell the frontend we're processing.
+    await websocket.send_text(json.dumps({
+        "type": "status",
+        "state": "thinking",
+    }))
+
+    accepted = engine.accept()
+    if accepted is None:
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "error": "no_pending_suggestion",
+        }))
+        return
+
+    # Execute the prepared_request via the configured LLM provider.
+    from llm_executor import LLMExecutor
+    executor = LLMExecutor()
+    request = accepted.prepared_request
+
+    # provider.chat() is async, so just await it directly.
+    response = await executor.execute(request)
+
+    if not response.success:
+        logger.warning("LLM executor failed: %s", response.error)
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "error": "llm_execution_failed",
+            "detail": response.error,
+        }))
+        await websocket.send_text(json.dumps({
+            "type": "status",
+            "state": "idle",
+        }))
+        return
+
+    reply_text = (response.content or "").strip()
+    if not reply_text:
+        reply_text = "I have nothing to add right now, Sir."
+
+    # Send the reply + TTS in parallel — exact same shape as user_message.
+    await websocket.send_text(json.dumps({
+        "type": "jarvis_reply",
+        "reply": reply_text,
+        "mood": "neutral",
+        "tools_used": [],
+        "source": "proactive",
+    }))
+    await websocket.send_text(json.dumps({
+        "type": "status",
+        "state": "speaking",
+    }))
+
+    async def _playback_then_idle() -> None:
+        try:
+            import threading as _th
+            def _play() -> None:
+                try:
+                    from tts.speaker import speak
+                    speak(reply_text)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("TTS playback failed: %s", exc)
+            _th.Thread(target=_play, daemon=True).start()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("TTS scheduling failed: %s", exc)
+        finally:
+            try:
+                await websocket.send_text(json.dumps({
+                    "type": "status", "state": "idle",
+                }))
+            except Exception:
+                pass
+
+    asyncio.create_task(_playback_then_idle())
+
+
+async def _handle_decline_suggestion(
+    websocket: WebSocket,
+    msg: dict,
+) -> None:
+    """Decline a pending Suggestion. No LLM call, no TTS."""
+    if main_suggestion_engine is None:
+        return
+    main_suggestion_engine.decline()
+    await websocket.send_text(json.dumps({
+        "type": "status",
+        "state": "idle",
+    }))
 
 
 # -----------------------------------------------------------------------------
