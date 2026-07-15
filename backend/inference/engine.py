@@ -36,6 +36,9 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, List, Optional, Tuple, Type
 
@@ -48,6 +51,27 @@ from .base import InferenceRule
 from .rules.software_development import SoftwareDevelopmentRule
 
 logger = logging.getLogger("jarvis.inference.engine")
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis cycle event (used by Planner and CognitiveLogger)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class HypothesisGenerated(RuntimeEvent):
+    """Published after a successful evaluate() cycle.
+
+    Subscribers (Planner, CognitiveLogger) receive one event per cycle.
+    ``cycle_id`` lets idempotent consumers avoid re-processing the same
+    cycle more than once.  ``top`` is included for convenience so
+    subscribers don't need to call back into the engine to read it.
+    """
+
+    type: str = "hypothesis_generated"
+    cycle_id: str = ""
+    ranked: Tuple[Hypothesis, ...] = ()
+    top: Optional[Hypothesis] = None
+    timestamp: float = 0.0
 
 
 class InferenceEngine:
@@ -163,6 +187,21 @@ class InferenceEngine:
         with self._lock:
             self._last_hypotheses = deduped
             self._last_evaluated_at = datetime.now()
+
+        # Notify downstream layers (Planner, CognitiveLogger).  We do
+        # this even when ``deduped`` is empty: an empty ranking is a
+        # valid Plan input and the Planner needs to know.
+        try:
+            runtime = get_runtime()
+            runtime.event_bus.publish(HypothesisGenerated(
+                cycle_id=str(uuid.uuid4()),
+                ranked=tuple(deduped),
+                top=(deduped[0] if deduped else None),
+                timestamp=time.time(),
+            ))
+        except RuntimeError:
+            # No Runtime singleton (e.g. unit tests).  Quiet skip.
+            pass
 
         if deduped:
             logger.debug(

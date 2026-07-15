@@ -206,6 +206,31 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Cognitive Logger could not start: %s", exc)
 
+    # ── JARVIS 3.0 Planner (decides whether to act) ──────────────────────────
+    try:
+        from planner import Planner
+        planner_service = Planner(
+            lookup_hypotheses=(
+                inference_engine_service.get_current_hypotheses
+                if inference_engine_service is not None
+                else None
+            ),
+            lookup_context=(
+                context_engine_service.get_current_context
+                if context_engine_service is not None
+                else None
+            ),
+            lookup_interpretation=(
+                context_engine_service.get_current_interpretation
+                if context_engine_service is not None
+                else None
+            ),
+        )
+        jarvis_runtime.register_service(planner_service)
+        logger.info("JARVIS 3.0 Planner registered")
+    except Exception as exc:
+        logger.warning("Planner could not start (continuing without it): %s", exc)
+
     # Configure scheduler
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
 
