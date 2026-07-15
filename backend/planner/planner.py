@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Dict, List, Optional, Tuple, Type
 
@@ -58,6 +59,28 @@ _DECISION_PRIORITY: Dict[Decision, int] = {
     Decision.WAIT: 2,
     Decision.IGNORE: 1,
 }
+
+
+@dataclass(frozen=True)
+class PlanProduced(RuntimeEvent):
+    """Emitted after every Plan evaluation.
+
+    Subscribers (CognitiveLogger, future Suggestion Engine) use this
+    as the natural end-of-pipeline marker for one thought: from
+    observation, through context, interpretation, inference, and
+    decision.
+
+    The `cycle_id` ties this event back to the originating reasoning
+    cycle.
+    """
+
+    type: str = "decision"
+    cycle_id: str = ""
+    decision: str = ""
+    reason: str = ""
+    confidence: float = 0.0
+    hypothesis_ids: Tuple[str, ...] = ()
+    timestamp: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +400,26 @@ class Planner:
         chosen = self._merge_verdicts(verdicts, hypotheses)
         with self._lock:
             self._last_plan = chosen
+
+        # Publish a PlanProduced event so the CognitiveLogger and
+        # future Suggestion Engine can observe the decision.  The
+        # cycle_id is the one from the most recent triggering event,
+        # or a fresh one for direct evaluate() calls.
+        try:
+            from runtime.runtime import get_runtime
+            runtime = get_runtime()
+            import time as _time
+            runtime.event_bus.publish(PlanProduced(
+                cycle_id=self._last_cycle_id or str(uuid.uuid4()),
+                decision=chosen.decision.value,
+                reason=chosen.reason,
+                confidence=chosen.confidence,
+                hypothesis_ids=chosen.supporting_hypotheses,
+                timestamp=_time.time(),
+            ))
+        except Exception:
+            pass
+
         logger.debug(
             "planner: produced Plan decision=%s confidence=%.2f reason=%r",
             chosen.decision.value,

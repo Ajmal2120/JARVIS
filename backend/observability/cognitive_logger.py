@@ -181,6 +181,7 @@ class CognitiveLogger:
         table — no other file changes.
         """
         event_type = getattr(event, "type", None)
+        cycle_id = getattr(event, "cycle_id", "") or ""
 
         # Observer events — also enrich with current Context / Interpretation /
         # Inference state if those services have been bound.
@@ -189,8 +190,14 @@ class CognitiveLogger:
             "idle_state_changed", "lock_state_changed",
         }
         if event_type in _OBSERVER_TYPES:
-            self._log_observer(event, event_type)
-            self._log_downstream()
+            self._log_observer(event, event_type, cycle_id)
+            self._log_downstream(cycle_id)
+            return
+
+        # Consolidated snapshot (from EventCoalescer) — treat as Observer.
+        if event_type == "consolidated_snapshot":
+            self._log_consolidated(event, cycle_id)
+            self._log_downstream(cycle_id)
             return
 
         # Context events
@@ -201,6 +208,7 @@ class CognitiveLogger:
                 is_idle=getattr(event, "is_idle", False),
                 is_locked=getattr(event, "is_locked", False),
                 confidence=getattr(event, "confidence", 0.0),
+                cycle_id=cycle_id,
             )
             return
 
@@ -211,44 +219,109 @@ class CognitiveLogger:
                 context_stability=getattr(event, "context_stability", "fluctuating"),
                 application_switch_frequency=getattr(event, "application_switch_frequency", 0.0),
                 focus_duration_s=getattr(event, "focus_duration_s", 0.0),
+                cycle_id=cycle_id,
             )
             return
 
-        # Inference events
-        if event_type == "hypothesis_generated":
-            details: dict[str, Any] = {
-                "id": getattr(event, "hypothesis_id", ""),
-                "confidence": getattr(event, "confidence", 0.0),
-                "evidence": getattr(event, "evidence", []),
-            }
-            self.hypothesis_generated(**details)
+        # Inference: persistent hypotheses — log as created / updated / expired
+        if event_type == "hypothesis_created":
+            self.hypothesis_created(
+                hypothesis_id=getattr(event, "hypothesis_id", ""),
+                confidence=getattr(event, "confidence", 0.0),
+                evidence=getattr(event, "evidence", []),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "hypothesis_updated":
+            self.hypothesis_updated(
+                hypothesis_id=getattr(event, "hypothesis_id", ""),
+                old_confidence=getattr(event, "old_confidence", 0.0),
+                new_confidence=getattr(event, "confidence", 0.0),
+                added_evidence=getattr(event, "added_evidence", []),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "hypothesis_expired":
+            self.hypothesis_expired(
+                hypothesis_id=getattr(event, "hypothesis_id", ""),
+                age_s=getattr(event, "age_s", 0.0),
+                cycle_id=cycle_id,
+            )
             return
 
-    def _log_observer(self, event: Any, event_type: str) -> None:
+        # Legacy single-event path (deprecated, kept for back-compat).
+        if event_type == "hypothesis_generated":
+            self.hypothesis_generated(
+                hypothesis_id=getattr(event, "hypothesis_id", ""),
+                confidence=getattr(event, "confidence", 0.0),
+                evidence=getattr(event, "evidence", []),
+                cycle_id=cycle_id,
+            )
+            return
+
+        # Planner
+        if event_type == "decision":
+            self.decision(
+                decision=getattr(event, "decision", ""),
+                reason=getattr(event, "reason", ""),
+                confidence=getattr(event, "confidence", 0.0),
+                hypothesis_ids=getattr(event, "hypothesis_ids", []),
+                cycle_id=cycle_id,
+            )
+            return
+
+        # Reasoning cycle bookkeeping
+        if event_type == "reasoning_cycle_ended":
+            self._log("Pipeline", "Reasoning Cycle Ended", {
+                "cycle_id": cycle_id,
+                "timestamp": getattr(event, "timestamp", 0.0),
+            })
+            return
+
+    def _log_observer(self, event: Any, event_type: str, cycle_id: str = "") -> None:
         """Log the Observer event itself."""
         if event_type == "window_changed":
             self.window_changed(
                 window_title=getattr(event, "window_title", ""),
                 process_name=getattr(event, "snapshot", {}).get("process_name", ""),
                 confidence=getattr(event, "confidence", 1.0),
+                cycle_id=cycle_id,
             )
         elif event_type == "application_changed":
             self.application_changed(
                 process_name=getattr(event, "process_name", ""),
                 window_title=getattr(event, "snapshot", {}).get("window_title", ""),
                 confidence=getattr(event, "confidence", 1.0),
+                cycle_id=cycle_id,
             )
         elif event_type == "idle_state_changed":
             self.idle_state_changed(
                 is_idle=getattr(event, "is_idle", False),
                 idle_seconds=getattr(event, "idle_seconds", 0.0),
+                cycle_id=cycle_id,
             )
         elif event_type == "lock_state_changed":
             self.lock_state_changed(
                 is_locked=getattr(event, "is_locked", False),
+                cycle_id=cycle_id,
             )
 
-    def _log_downstream(self) -> None:
+    def _log_consolidated(self, event: Any, cycle_id: str) -> None:
+        """Log a ConsolidatedSnapshot as a coalesced Observer entry."""
+        snapshot = getattr(event, "snapshot", {})
+        primary_type = getattr(event, "primary_type", "") or ""
+        self._log("Observer", "Coalesced Snapshot", {
+            "primary_type": primary_type,
+            "event_count": getattr(event, "event_count", 1),
+            "window_ms": getattr(event, "window_ms", 150),
+            "active_window": snapshot.get("window_title", ""),
+            "active_application": snapshot.get("process_name", ""),
+            "is_idle": snapshot.get("is_idle", False),
+            "is_locked": snapshot.get("is_locked", False),
+            "cycle_id": cycle_id,
+        })
+
+    def _log_downstream(self, cycle_id: str = "") -> None:
         """Pull state from bound services and log it.
 
         Called after every Observer event so the cognitive log captures
@@ -269,6 +342,7 @@ class CognitiveLogger:
                     is_idle=getattr(ctx, "is_idle", False),
                     is_locked=getattr(ctx, "is_locked", False),
                     confidence=getattr(ctx, "confidence", 0.0),
+                    cycle_id=cycle_id,
                 )
             except Exception:
                 pass
@@ -290,6 +364,7 @@ class CognitiveLogger:
                     ),
                     application_switch_frequency=getattr(interp, "application_switch_frequency", 0.0),
                     focus_duration_s=getattr(interp, "current_focus_duration_s", 0.0),
+                    cycle_id=cycle_id,
                 )
             except Exception:
                 pass
@@ -303,6 +378,7 @@ class CognitiveLogger:
                         hypothesis_id=h.id,
                         confidence=h.confidence,
                         evidence=h.evidence,
+                        cycle_id=cycle_id,
                     )
             except Exception:
                 pass
@@ -313,35 +389,42 @@ class CognitiveLogger:
 
     def window_changed(
         self, window_title: str, process_name: str, confidence: float = 1.0,
+        cycle_id: str = "",
     ) -> None:
         """Log a WindowChanged event."""
         self._log("Observer", "WindowChanged", {
             "window_title": window_title,
             "process_name": process_name,
             "confidence": confidence,
+            "cycle_id": cycle_id,
         })
 
     def application_changed(
         self, process_name: str, window_title: str = "", confidence: float = 1.0,
+        cycle_id: str = "",
     ) -> None:
         """Log an ApplicationChanged event."""
         self._log("Observer", "ApplicationChanged", {
             "process_name": process_name,
             "window_title": window_title,
             "confidence": confidence,
+            "cycle_id": cycle_id,
         })
 
-    def idle_state_changed(self, is_idle: bool, idle_seconds: float = 0.0) -> None:
+    def idle_state_changed(self, is_idle: bool, idle_seconds: float = 0.0,
+                           cycle_id: str = "") -> None:
         """Log an IdleStateChanged event."""
         self._log("Observer", "IdleStateChanged", {
             "is_idle": is_idle,
             "idle_seconds": idle_seconds,
+            "cycle_id": cycle_id,
         })
 
-    def lock_state_changed(self, is_locked: bool) -> None:
+    def lock_state_changed(self, is_locked: bool, cycle_id: str = "") -> None:
         """Log a LockStateChanged event."""
         self._log("Observer", "LockStateChanged", {
             "is_locked": is_locked,
+            "cycle_id": cycle_id,
         })
 
     # ------------------------------------------------------------------ #
@@ -355,6 +438,7 @@ class CognitiveLogger:
         is_idle: bool = False,
         is_locked: bool = False,
         confidence: float = 0.0,
+        cycle_id: str = "",
     ) -> None:
         """Log a Context Engine update."""
         self._log("Context", "Context Updated", {
@@ -363,6 +447,7 @@ class CognitiveLogger:
             "is_idle": is_idle,
             "is_locked": is_locked,
             "confidence": confidence,
+            "cycle_id": cycle_id,
         })
 
     # ------------------------------------------------------------------ #
@@ -375,6 +460,7 @@ class CognitiveLogger:
         context_stability: str = "fluctuating",
         application_switch_frequency: float = 0.0,
         focus_duration_s: float = 0.0,
+        cycle_id: str = "",
     ) -> None:
         """Log a ContextInterpreter update."""
         self._log("Interpreter", "Interpretation Updated", {
@@ -382,6 +468,7 @@ class CognitiveLogger:
             "context_stability": context_stability,
             "application_switch_frequency": application_switch_frequency,
             "focus_duration_s": focus_duration_s,
+            "cycle_id": cycle_id,
         })
 
     # ------------------------------------------------------------------ #
@@ -390,23 +477,65 @@ class CognitiveLogger:
 
     def hypothesis_generated(
         self, hypothesis_id: str, confidence: float, evidence: list[str],
+        cycle_id: str = "",
     ) -> None:
-        """Log a Hypothesis generated by the Inference Engine."""
+        """Log a Hypothesis generated by the Inference Engine (legacy)."""
         self._log("Inference", "Hypothesis Generated", {
             "id": hypothesis_id,
             "confidence": confidence,
             "evidence": evidence,
+            "cycle_id": cycle_id,
+        })
+
+    def hypothesis_created(
+        self, hypothesis_id: str, confidence: float, evidence: list[str],
+        cycle_id: str = "",
+    ) -> None:
+        """Log a brand-new Hypothesis (first appearance in the persistent store)."""
+        self._log("Inference", "Hypothesis Created", {
+            "id": hypothesis_id,
+            "confidence": confidence,
+            "evidence": evidence,
+            "cycle_id": cycle_id,
+        })
+
+    def hypothesis_updated(
+        self, hypothesis_id: str, old_confidence: float, new_confidence: float,
+        added_evidence: list[str] = (), cycle_id: str = "",
+    ) -> None:
+        """Log a Hypothesis confidence/evidence update."""
+        self._log("Inference", "Hypothesis Updated", {
+            "id": hypothesis_id,
+            "old_confidence": old_confidence,
+            "new_confidence": new_confidence,
+            "added_evidence": added_evidence,
+            "cycle_id": cycle_id,
+        })
+
+    def hypothesis_expired(
+        self, hypothesis_id: str, age_s: float = 0.0, cycle_id: str = "",
+    ) -> None:
+        """Log a Hypothesis that has expired (stale for too long)."""
+        self._log("Inference", "Hypothesis Expired", {
+            "id": hypothesis_id,
+            "age_s": age_s,
+            "cycle_id": cycle_id,
         })
 
     # ------------------------------------------------------------------ #
     # Planner (future extension points)                                    #
     # ------------------------------------------------------------------ #
 
-    def decision(self, decision: str, reason: str = "") -> None:
-        """Log a Planner decision (ACT / WAIT / DO_NOT_INTERRUPT)."""
+    def decision(self, decision: str, reason: str = "",
+                 confidence: float = 0.0, hypothesis_ids: list[str] = (),
+                 cycle_id: str = "") -> None:
+        """Log a Planner decision (ASK_PERMISSION / WAIT / IGNORE)."""
         self._log("Planner", "Decision", {
             "decision": decision,
             "reason": reason,
+            "confidence": confidence,
+            "hypothesis_ids": list(hypothesis_ids),
+            "cycle_id": cycle_id,
         })
 
     # ------------------------------------------------------------------ #

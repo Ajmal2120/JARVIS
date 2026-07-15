@@ -148,6 +148,10 @@ def main():
     # ==========================================================================
     # Test 7: InferenceEngine.evaluate() returns ranked list
     # ==========================================================================
+    # Persistence is active (start() was called in setup).  Reset the store
+    # so this test starts from a clean slate — it's testing the ranking
+    # logic, not cross-test accumulation.
+    ie.reset_persistent()
     with patch.object(ie, "_lookup_context", return_value=fake_context), \
          patch.object(ie, "_lookup_interpretation", return_value=fake_interp):
         ranked = ie.evaluate()

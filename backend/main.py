@@ -147,6 +147,16 @@ async def lifespan(app: FastAPI):
         jarvis_runtime.state.value,
     )
 
+    # ── JARVIS 3.0 Event Coalescer (buffers Observer events) ──────────────────
+    _event_coalescer = None
+    try:
+        from runtime.event_coalescer import EventCoalescer
+        _event_coalescer = EventCoalescer(window_ms=150)
+        _event_coalescer.start()
+        logger.info("JARVIS 3.0 Event Coalescer started")
+    except Exception as exc:
+        logger.warning("Event Coalescer could not start (continuing): %s", exc)
+
     # ── JARVIS 3.0 Observer (first Operating Intelligence service) ─────────────
     try:
         from observer import Observer
