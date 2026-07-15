@@ -278,6 +278,47 @@ class CognitiveLogger:
             })
             return
 
+        # Suggestion lifecycle
+        if event_type == "suggestion_created":
+            self.suggestion_event(
+                action="Created",
+                suggestion_id=getattr(event, "suggestion_id", ""),
+                provider=getattr(event, "provider", ""),
+                confidence=getattr(event, "confidence", 0.0),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "suggestion_asked":
+            self.suggestion_event(
+                action="Asked",
+                suggestion_id=getattr(event, "suggestion_id", ""),
+                message=getattr(event, "message", ""),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "suggestion_accepted":
+            self.suggestion_event(
+                action="Accepted",
+                suggestion_id=getattr(event, "suggestion_id", ""),
+                provider=getattr(event, "provider", ""),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "suggestion_declined":
+            self.suggestion_event(
+                action="Declined",
+                suggestion_id=getattr(event, "suggestion_id", ""),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "suggestion_expired":
+            self.suggestion_event(
+                action="Expired",
+                suggestion_id=getattr(event, "suggestion_id", ""),
+                cycle_id=cycle_id,
+            )
+            return
+
     def _log_observer(self, event: Any, event_type: str, cycle_id: str = "") -> None:
         """Log the Observer event itself."""
         if event_type == "window_changed":
@@ -542,10 +583,22 @@ class CognitiveLogger:
     # Suggestion (future extension points)                                 #
     # ------------------------------------------------------------------ #
 
-    def suggestion_event(self, action: str, suggestion_id: str = "") -> None:
-        """Log a Suggestion event (generated / dismissed / accepted)."""
-        self._log("Suggestion", f"Suggestion {action}", {
+    def suggestion_event(
+        self,
+        action: str = "",
+        suggestion_id: str = "",
+        provider: str = "",
+        confidence: float = 0.0,
+        message: str = "",
+        cycle_id: str = "",
+    ) -> None:
+        """Log a Suggestion event (created / asked / accepted / declined / expired)."""
+        self._log("Suggestion", f"Suggestion {action}" if action else "Suggestion", {
             "suggestion_id": suggestion_id,
+            "provider": provider,
+            "confidence": confidence,
+            "message": message,
+            "cycle_id": cycle_id,
         })
 
     # ------------------------------------------------------------------ #

@@ -241,6 +241,36 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Planner could not start (continuing without it): %s", exc)
 
+    # ── JARVIS 3.0 Suggestion Engine (subscribes to Planner decisions) ─────────
+    try:
+        from suggestion import SuggestionEngine
+        suggestion_engine_service = SuggestionEngine(
+            lookup_context=(
+                context_engine_service.get_current_context
+                if context_engine_service is not None
+                else None
+            ),
+            lookup_interpretation=(
+                context_engine_service.get_current_interpretation
+                if context_engine_service is not None
+                else None
+            ),
+            lookup_hypotheses=(
+                inference_engine_service.get_current_hypotheses
+                if inference_engine_service is not None
+                else None
+            ),
+            lookup_plan=(
+                planner_service.get_current_plan
+                if planner_service is not None
+                else None
+            ),
+        )
+        jarvis_runtime.register_service(suggestion_engine_service)
+        logger.info("JARVIS 3.0 Suggestion Engine registered")
+    except Exception as exc:
+        logger.warning("Suggestion Engine could not start (continuing without it): %s", exc)
+
     # Configure scheduler
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
 
