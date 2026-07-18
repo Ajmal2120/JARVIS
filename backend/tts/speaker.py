@@ -18,6 +18,7 @@ import asyncio
 import io
 import logging
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -59,6 +60,15 @@ class KokoroTTS(TTSEngine):
     ENGLISH_VOICE = "bf_vale"   # British male voice (male!)
     CHINESE_VOICE = "zf_001"    # Chinese female voice (if model supports it)
     HINDI_VOICE = "bf_vale"     # Use British voice as fallback for Hindi
+
+    # SAPI voice name → Kokoro voice ID mapping
+    # Used to honour config.TTS_VOICE when it's a SAPI-style name
+    SAPI_TO_KOKORO_VOICE = {
+        "en-GB-RyanNeural": "bf_vale",   # British male → British male
+        "en-US-GuyNeural": "af_heart",   # American male
+        "en-US-JennyNeural": "af_heart", # American female
+        "en-GB-SoniaNeural": "bf_vale",  # British female → closest British
+    }
 
     def __init__(self):
         self._engine = None
@@ -144,11 +154,35 @@ class KokoroTTS(TTSEngine):
     def _get_voice(self, text: str) -> tuple[str, str]:
         """Get appropriate voice and language. Returns (voice, lang_code)."""
         lang = self._detect_lang(text)
+
         if lang == "zh" and "zf_001" in self._available_voices:
             return self.CHINESE_VOICE, "zh"
-        elif lang == "hi":
-            return self.HINDI_VOICE, "en-us"  # British voice works for Hindi
+
+        if lang == "hi":
+            return self.HINDI_VOICE, "en-us"
+
+        # English — use the configured voice if available
+        preferred = self._get_preferred_voice()
+        if preferred and preferred in self._available_voices:
+            return preferred, "en-us"
+
         return self.ENGLISH_VOICE, "en-us"
+
+    def _get_preferred_voice(self) -> str | None:
+        """Return the configured preferred voice ID if it's available."""
+        try:
+            from config import settings
+            voice_id = getattr(settings, "TTS_VOICE_ID", None)
+            if voice_id and voice_id in self._available_voices:
+                return voice_id
+            # Fallback: try SAPI name mapping
+            sapi_name = getattr(settings, "TTS_VOICE", "")
+            kokoro_id = self.SAPI_TO_KOKORO_VOICE.get(sapi_name)
+            if kokoro_id and kokoro_id in self._available_voices:
+                return kokoro_id
+        except Exception:
+            pass
+        return None
 
     def _speak_via_sapi(self, text: str) -> bool:
         """Fallback: speak via SAPI when Kokoro fails."""
@@ -226,23 +260,9 @@ class KokoroTTS(TTSEngine):
             return self._speak_via_sapi(text)
 
     def speak_async(self, text: str):
-        """Run blocking speak() in a background thread with health monitoring."""
-        global _speaking_thread, _speech_aborted
-
-        _speech_aborted.clear()
-
-        # Create thread with error reporting
-        def _speak_wrapper():
-            try:
-                success = self.speak(text)
-                if not success:
-                    logger.error("[TTS] Async speech failed for: \"%s\"", text[:50])
-            except Exception as e:
-                logger.error("[TTS] Async speech exception: %s", e, exc_info=True)
-
-        _speaking_thread = threading.Thread(target=_speak_wrapper, daemon=True)
-        _speaking_thread.start()
-        logger.info("[TTS] Started background thread for: \"%s\"", text[:50])
+        """Enqueue text for playback through the serial speech queue."""
+        _speech_queue.enqueue(text)
+        logger.info("[TTS] Queued: \"%s\"", text[:50])
 
     def synthesize(self, text: str) -> bytes:
         if not text.strip():
@@ -317,22 +337,9 @@ class SAPITTS(TTSEngine):
             return False
 
     def speak_async(self, text: str):
-        """Run blocking speak() in a background thread with error reporting."""
-        global _speaking_thread, _speech_aborted
-
-        _speech_aborted.clear()
-
-        def _speak_wrapper():
-            try:
-                success = self.speak(text)
-                if not success:
-                    logger.error("[TTS] SAPI async speech failed for: \"%s\"", text[:50])
-            except Exception as e:
-                logger.error("[TTS] SAPI async speech exception: %s", e, exc_info=True)
-
-        _speaking_thread = threading.Thread(target=_speak_wrapper, daemon=True)
-        _speaking_thread.start()
-        logger.info("[TTS] Started SAPI background thread for: \"%s\"", text[:50])
+        """Enqueue text for playback through the serial speech queue."""
+        _speech_queue.enqueue(text)
+        logger.info("[TTS] SAPI queued: \"%s\"", text[:50])
 
     def synthesize(self, text: str) -> bytes:
         """Synthesize text to WAV bytes using a fresh SAPI engine."""
@@ -396,22 +403,9 @@ $synth.Speak("{escaped}")
             return False
 
     def speak_async(self, text: str):
-        """Run blocking speak() in a background thread with error reporting."""
-        global _speaking_thread, _speech_aborted
-
-        _speech_aborted.clear()
-
-        def _speak_wrapper():
-            try:
-                success = self.speak(text)
-                if not success:
-                    logger.error("[TTS] PowerShell async speech failed for: \"%s\"", text[:50])
-            except Exception as e:
-                logger.error("[TTS] PowerShell async speech exception: %s", e, exc_info=True)
-
-        _speaking_thread = threading.Thread(target=_speak_wrapper, daemon=True)
-        _speaking_thread.start()
-        logger.info("[TTS] Started PowerShell background thread for: \"%s\"", text[:50])
+        """Enqueue text for playback through the serial speech queue."""
+        _speech_queue.enqueue(text)
+        logger.info("[TTS] PowerShell queued: \"%s\"", text[:50])
 
     def synthesize(self, text: str) -> bytes:
         """Not implemented for PowerShell fallback."""
@@ -433,59 +427,88 @@ def _get_output_device() -> Optional[str | int]:
 
 
 # ---------------------------------------------------------------------------
-# Thread health monitoring
+# Speech Queue — guarantees exactly one utterance plays at a time
 # ---------------------------------------------------------------------------
 
-_speaking_thread: Optional[threading.Thread] = None
-_speech_aborted = threading.Event()
-_speak_lock = threading.Lock()
-_last_speak_success: bool = False
-_last_speak_error: Optional[str] = None
+class _SpeechQueue:
+    """Single-worker queue that serializes all TTS playback.
 
-
-def interrupt_speech() -> bool:
+    Every call to enqueue() appends a (text, event) pair.
+    A dedicated background thread pops items one by one and calls speak().
+    Calling interrupt() sets the event, causing the current speak() to abort.
     """
-    Interrupt any currently playing speech.
 
-    Returns True if speech was interrupted, False if nothing was playing.
-    """
-    global _speaking_thread, _speech_aborted
+    def __init__(self):
+        self._q: "queue.Queue[tuple[str, threading.Event]]" = queue.Queue()
+        self._worker: Optional[threading.Thread] = None
+        self._stop = threading.Event()
 
-    if _speaking_thread and _speaking_thread.is_alive():
+    def start(self):
+        if self._worker and self._worker.is_alive():
+            return
+        self._stop.clear()
+        self._worker = threading.Thread(target=self._run, daemon=True, name="TTS-Queue")
+        self._worker.start()
+        logger.info("[TTS-Queue] Worker thread started")
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                text, done_event = self._q.get(timeout=0.3)
+            except queue.Empty:
+                continue
+            try:
+                speak(text)  # blocking — this is the ONLY thread that calls sd.play()
+            except Exception as exc:
+                logger.error("[TTS-Queue] Playback error: %s", exc)
+            finally:
+                if done_event:
+                    done_event.set()
+                self._q.task_done()
+
+    def enqueue(self, text: str, timeout: float = 30.0) -> bool:
+        """Add text to the queue. Returns True if accepted, False if timed out."""
+        if not text or not text.strip():
+            return False
+        self.start()  # lazy-start the worker thread
+        done_event = threading.Event()
+        try:
+            self._q.put((text, done_event), timeout=timeout)
+        except queue.Full:
+            logger.error("[TTS-Queue] Queue full, dropping: %.50s", text)
+            return False
+        return done_event.wait(timeout=timeout)
+
+    def interrupt(self):
+        """Abort current playback and drain the queue."""
         _speech_aborted.set()
-        logger.info("[TTS] Speech interrupted by user")
-        # Give thread a moment to stop
-        _speaking_thread.join(timeout=0.5)
-        return True
-
-    # Also try to stop sounddevice
-    try:
         sd.stop()
-    except Exception:
-        pass
+        # Drain pending items
+        drained = 0
+        while not self._q.empty():
+            try:
+                _, ev = self._q.get_nowait()
+                if ev:
+                    ev.set()  # unblock waiters so they don't hang
+                drained += 1
+            except queue.Empty:
+                break
+        if drained:
+            logger.info("[TTS-Queue] Drained %d pending utterances", drained)
 
-    return False
+    def is_speaking(self) -> bool:
+        return not self._q.empty() or (
+            self._worker is not None and self._worker.is_alive()
+        )
+
+    def stop(self):
+        self._stop.set()
+        self.interrupt()
 
 
-def is_speaking() -> bool:
-    """Check if JARVIS is currently speaking."""
-    global _speaking_thread
+# Module-level singleton
+_speech_queue = _SpeechQueue()
 
-    # Check thread health
-    if _speaking_thread and _speaking_thread.is_alive():
-        return True
-
-    # Thread died silently
-    if _speaking_thread and not _speaking_thread.is_alive():
-        logger.warning("[TTS] Speech thread died silently")
-        _speaking_thread = None
-
-    return False
-
-
-def get_last_speak_status() -> tuple[bool, Optional[str]]:
-    """Return (success, error_message) from the last speak call."""
-    return _last_speak_success, _last_speak_error
 
 
 # ---------------------------------------------------------------------------
@@ -566,23 +589,23 @@ def speak(text: str, voice: Optional[str] = None) -> bool:
 
 
 def speak_async(text: str, voice: Optional[str] = None):
-    """Speak text asynchronously (non-blocking)."""
+    """Enqueue text for async playback (serial, never overlaps)."""
     if not text or not text.strip():
         logger.warning("[TTS] speak_async() called with empty text")
         return
-
-    engine = _get_engine()
-    engine.speak_async(text)
+    _speech_queue.enqueue(text)
 
 
 def interrupt() -> bool:
-    """Interrupt current speech. Returns True if speech was interrupted."""
-    return interrupt_speech()
+    """Interrupt current speech and drain the queue. Returns True if interrupted."""
+    was = _speech_queue.is_speaking()
+    _speech_queue.interrupt()
+    return was
 
 
 def speaking() -> bool:
-    """Check if currently speaking."""
-    return is_speaking()
+    """Check if TTS is currently active (speaking or queue has pending items)."""
+    return _speech_queue.is_speaking()
 
 
 def synthesize_bytes(text: str, voice: Optional[str] = None) -> bytes:

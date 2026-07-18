@@ -516,7 +516,15 @@ def main():
 
                 logger.info("Voice loop active, listening for commands...")
                 from voice.stt import listen_continuous
+                from command_router import route_command_via_loop
+
+                _SEPARATOR = "-" * 40
+                _LISTENING_ACK = False
+
                 for text in listen_continuous():
+                    # Measure total request time from this point
+                    t0 = time.monotonic()
+
                     logger.info(f"STT raw: '{text}'")
                     logger.info(f"Wake detector active: {wake_detector.active}")
                     if not text:
@@ -538,25 +546,77 @@ def main():
 
                         logger.info(f"Voice command: {command}")
 
-                    # Route through the command router for both local and API commands
-                    from command_router import route_command_sync
-                    result = route_command_sync(command=command)
+                    # ── Immediate feedback: acknowledge we heard the user ──
+                    if not _LISTENING_ACK:
+                        _speak_async("One moment, Sir.")
+                        _LISTENING_ACK = True
+
+                    # ── Stage 2: Intent routing (use existing event loop) ──
+                    t1 = time.monotonic()
+                    stt_ms = (t1 - t0) * 1000
+                    result = route_command_via_loop(command=command, loop=_async_loop)
+                    t2 = time.monotonic()
+                    intent_ms = (t2 - t1) * 1000
+
                     if result.local_executed:
-                        logger.info(f"Local execution: {result.tools_used[0]} for '{command}'")
+                        tts_start = time.monotonic()
                         _speak_async(result.reply)
+                        # For local commands, total = now
+                        t3 = time.monotonic()
+                        tts_ms = (t3 - tts_start) * 1000
+                        logger.info(_SEPARATOR)
+                        logger.info("JARVIS")
+                        logger.info(f"STT: {stt_ms:.0f} ms")
+                        logger.info(f"Intent: {intent_ms:.0f} ms")
+                        logger.info(f"LLM: local (skipped)")
+                        logger.info(f"TTS: {tts_ms:.0f} ms")
+                        logger.info(f"TOTAL: {(t3 - t0) * 1000:.0f} ms")
+                        logger.info(_SEPARATOR)
+                        _LISTENING_ACK = False
                         continue
 
-                    # Run the async handler in the persistent loop
+                    # ── Stage 3+4: LLM + TTS via streaming (async handler) ──
                     future = asyncio.run_coroutine_threadsafe(
                         voice_command_handler(command), _async_loop
                     )
                     try:
+                        llm_tts_start = time.monotonic()
                         reply = future.result(timeout=65)
+                        t3 = time.monotonic()
+                        llm_ms = (t3 - llm_tts_start) * 1000
+
                         if reply:
+                            # TTS is async (spawns daemon thread), so we can't
+                            # easily measure its wall time here. We measure the
+                            # time until the _speak_async call returns (non-blocking).
+                            tts_start = time.monotonic()
                             _speak_async(reply)
+                            tts_ms = (time.monotonic() - tts_start) * 1000
+                        else:
+                            tts_ms = 0
+
+                        logger.info(_SEPARATOR)
+                        logger.info("JARVIS")
+                        logger.info(f"STT: {stt_ms:.0f} ms")
+                        logger.info(f"Intent: {intent_ms:.0f} ms")
+                        logger.info(f"LLM: {llm_ms:.0f} ms")
+                        logger.info(f"TTS: {tts_ms:.0f} ms  (async, speaks in background)")
+                        logger.info(f"TOTAL: {(t3 - t0) * 1000:.0f} ms")
+                        logger.info(_SEPARATOR)
                     except Exception as e:
                         logger.error(f"Command failed: {e}")
                         _speak_async("I encountered an error, Sir.")
+                        t3 = time.monotonic()
+                        logger.info(_SEPARATOR)
+                        logger.info("JARVIS")
+                        logger.info(f"STT: {stt_ms:.0f} ms")
+                        logger.info(f"Intent: {intent_ms:.0f} ms")
+                        logger.info(f"LLM: ERROR")
+                        logger.info(f"TTS: 0 ms")
+                        logger.info(f"TOTAL: {(t3 - t0) * 1000:.0f} ms")
+                        logger.info(_SEPARATOR)
+
+                    _LISTENING_ACK = False
 
             voice_thread = threading.Thread(target=_voice_loop, daemon=True, name="VoiceLoop")
             voice_thread.start()

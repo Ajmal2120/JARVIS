@@ -113,26 +113,23 @@ class GeneralDevelopmentProvider(SuggestionProvider):
         if top.confidence < self._MIN_CONFIDENCE:
             return None
 
-        # Build a minimal, provider-specific message.  This is what
-        # JARVIS would say (via Voice or UI) — it does NOT call an LLM.
+        # Build a contextual message and reason using the Messenger.
+        from .messenger import build_suggestion_text
+
         focus_topic = (
-            getattr(context, "active_window", "your work") or "your work"
+            getattr(context, "active_window", "") or "your work"
         )
         focus_app = (
-            getattr(context, "active_application", "your application")
-            or "your application"
+            getattr(context, "active_application", "") or "your application"
+        )
+        message, reason = build_suggestion_text(
+            hypothesis_id=top.id,
+            context=context,
+            interpretation=interpretation,
+            focus_topic_override=focus_topic if focus_topic else None,
         )
 
         title = "Focus support"
-        message = (
-            f"Sir, I notice you're working on '{focus_topic}' in "
-            f"'{focus_app}'. Would you like me to help?"
-        )
-        reason = (
-            f"software_development hypothesis at confidence "
-            f"{top.confidence:.0%}; stable context with high interaction "
-            f"level."
-        )
 
         # Prepare the structured payload a future LLM executor would
         # consume.  We intentionally avoid importing or referencing any

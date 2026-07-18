@@ -105,16 +105,13 @@ async def apply_streaming_patch() -> None:
         spoke_first = {"done": False}
 
         async def _speak_first(sentence: str) -> None:
-            """Speak the first complete sentence immediately."""
+            """Speak the first complete sentence immediately via the TTS queue."""
             if not spoke_first["done"]:
                 spoke_first["done"] = True
                 try:
-                    from tts.speaker import speak as kokoro_speak
-                    threading.Thread(
-                        target=lambda: asyncio.run(kokoro_speak(sentence)),
-                        daemon=True,
-                    ).start()
-                    logger.info("[stream] spoke first sentence: %.60s…", sentence)
+                    from tts.speaker import speak_async as _qspeak
+                    _qspeak(sentence)
+                    logger.info("[stream] queued first sentence: %.60s…", sentence)
                 except Exception as e:
                     logger.warning("[stream] first-sentence speak failed: %s", e)
 

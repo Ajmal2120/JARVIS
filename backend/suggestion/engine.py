@@ -40,14 +40,22 @@ from typing import Any, Callable, List, Optional, Tuple, Type
 from runtime.runtime import get_runtime
 from runtime.events import RuntimeEvent
 
+from .cooldown import CooldownManager
 from .events import (
+    CooldownExpired,
+    CooldownStarted,
     SuggestionAccepted,
     SuggestionAsked,
     SuggestionCleared,
     SuggestionCreated,
     SuggestionDeclined,
+    SuggestionDelayed,
+    SuggestionDisplayed,
     SuggestionExpired,
+    SuggestionSuppressed,
 )
+from .messenger import build_suggestion_text
+from .metrics import SuggestionMetricsTracker
 from .models import (
     Suggestion,
     SuggestionStatus,
@@ -117,6 +125,9 @@ class SuggestionEngine:
         lookup_plan: Optional[PlanLookup] = None,
         provider_classes: Optional[Tuple[Type[SuggestionProvider], ...]] = None,
         ttl_s: float = 120.0,
+        cooldown_manager: Optional[CooldownManager] = None,
+        activity_monitor: Optional[Any] = None,
+        metrics_tracker: Optional[SuggestionMetricsTracker] = None,
     ) -> None:
         """Construct the engine.
 
@@ -134,6 +145,13 @@ class SuggestionEngine:
                                    takes the first non-None result.
             ttl_s:                 Time-to-live for a pending Suggestion
                                    in seconds.
+            cooldown_manager:      Optional ``CooldownManager`` instance.
+                                   If None, a default one is created with
+                                   event publishing wired in.
+            activity_monitor:      Optional ``ActivityMonitor`` instance.
+                                   If None, a default one is created.
+            metrics_tracker:       Optional ``SuggestionMetricsTracker``.
+                                   If None, a default one is created.
         """
         self._lookup_context = lookup_context
         self._lookup_interpretation = lookup_interpretation
@@ -144,6 +162,18 @@ class SuggestionEngine:
             provider_classes if provider_classes is not None else DEFAULT_PROVIDERS
         )
         self._ttl_s = max(0.1, float(ttl_s))
+
+        # Sprint 2: cooldown, activity, metrics
+        if cooldown_manager is not None:
+            self._cooldown = cooldown_manager
+        else:
+            self._cooldown = CooldownManager(
+                on_expired=self._on_cooldown_expired,
+            )
+        self._activity = activity_monitor
+        self._metrics = metrics_tracker if metrics_tracker is not None else SuggestionMetricsTracker()
+        self._delivery_timer: Optional[threading.Timer] = None
+        self._delivery_pending: bool = False
 
         self._lock = threading.Lock()
         self._providers: List[SuggestionProvider] = []
@@ -161,6 +191,9 @@ class SuggestionEngine:
         self._unsubscribe = runtime.event_bus.subscribe(self._on_event)
         with self._lock:
             self._providers = [cls() for cls in self._provider_classes]
+        # Start activity monitor if present
+        if self._activity is not None:
+            self._activity.start()
         logger.info(
             "suggestion_engine: started with %d provider(s): %s",
             len(self._providers),
@@ -169,6 +202,7 @@ class SuggestionEngine:
 
     def stop(self) -> None:
         """Unsubscribe and clear pending suggestion."""
+        self._cancel_delivery_timer()
         if self._unsubscribe:
             self._unsubscribe()
             self._unsubscribe = None
@@ -176,6 +210,11 @@ class SuggestionEngine:
             self._pending = None
             self._providers.clear()
             self._current_cycle_id = ""
+        # Stop activity monitor
+        if self._activity is not None:
+            self._activity.stop()
+        # Log session metrics
+        self._metrics.log_summary()
         logger.info("suggestion_engine: stopped")
 
     # ------------------------------------------------------------------ #
@@ -203,9 +242,24 @@ class SuggestionEngine:
 
     def _try_generate(self, cycle_id: str) -> None:
         """Run providers in order; store the first non-None result."""
+        # --- Cooldown check (Part 1) ---
+        if self._cooldown.is_active():
+            remaining = self._cooldown.remaining_s()
+            cooldown_reason = self._cooldown.get_cooldown_info().get("reason", "unknown")
+            self._metrics.on_suppressed_cooldown(cooldown_reason)
+            self._on_suppressed(suggestion_id="", reason=f"cooldown_{cooldown_reason}", cycle_id=cycle_id)
+            logger.debug(
+                "suggestion_engine: suppressed (cooldown, %.0fs remaining, reason=%s)",
+                remaining,
+                cooldown_reason,
+            )
+            return
+
+        # --- Duplicate check (Part 1) ---
+        # We don't have the suggestion text yet, so we'll check after generation.
+        # Just make sure there's no pending suggestion blocking.
         with self._lock:
             if self._pending is not None:
-                # Already have a pending suggestion — don't replace.
                 return
             providers = list(self._providers)
             context = self._safe(self._lookup_context)
@@ -230,32 +284,174 @@ class SuggestionEngine:
         if suggestion is None:
             return
 
-        # Stamp the suggestion with the originating cycle_id.
-        suggestion = replace(suggestion, cycle_id=cycle_id)
+        # --- Duplicate suppression (Part 1) ---
+        if self._cooldown.is_duplicate(suggestion.message):
+            self._metrics.on_suppressed_duplicate()
+            logger.debug(
+                "suggestion_engine: suppressed (duplicate: %r)",
+                suggestion.message[:60],
+            )
+            self._publish_lifecycle(SuggestionCleared(
+                suggestion_id=suggestion.id,
+                cycle_id=cycle_id,
+                timestamp=time.time(),
+            ))
+            return
 
+        # --- Activity awareness: delay delivery (Part 2) ---
+        if self._activity is not None:
+            try:
+                if not self._activity.is_quiet():
+                    # User is actively typing — delay the suggestion.
+                    logger.debug(
+                        "suggestion_engine: suggestion delayed (user active)"
+                    )
+                    self._deliver_after_quiet(suggestion, cycle_id)
+                    return
+            except Exception:
+                pass  # Activity monitor failure is non-fatal
+
+        # --- All checks passed — store and display ---
+        self._store_and_display(suggestion, cycle_id)
+
+    def _deliver_after_quiet(self, suggestion: Suggestion, cycle_id: str) -> None:
+        """Delay delivery until the user is quiet.
+
+        Stores the suggestion and sets a timer to check activity again.
+        """
         with self._lock:
             if self._pending is not None:
-                # Someone beat us to it.
                 return
             self._pending = suggestion
             self._current_cycle_id = cycle_id
-            old_id = suggestion.id
-            provider_name = suggestion.provider
-            confidence = suggestion.confidence
+            self._delivery_pending = True
 
+        # Cancel any existing timer
+        self._cancel_delivery_timer()
+
+        # Create a timer that re-checks activity every second
+        def _retry():
+            try:
+                with self._lock:
+                    if self._pending is None or self._pending.id != suggestion.id:
+                        return  # Suggestion was cleared
+                    if self._cooldown.is_active():
+                        # Cooldown started during delay — suppress
+                        self._pending = None
+                        self._current_cycle_id = ""
+                        self._delivery_pending = False
+                        self._metrics.on_suppressed_cooldown("delayed_cooldown")
+                        logger.debug(
+                            "suggestion_engine: suggestion suppressed "
+                            "(cooldown activated during delay)"
+                        )
+                        return
+
+                if self._activity is not None and not self._activity.is_quiet():
+                    # Still not quiet — retry in 1s
+                    self._delivery_timer = threading.Timer(1.0, _retry)
+                    self._delivery_timer.daemon = True
+                    self._delivery_timer.start()
+                    return
+
+                # User is quiet now — display the suggestion
+                self._store_and_display(suggestion, cycle_id)
+            except Exception:
+                pass
+
+        self._delivery_timer = threading.Timer(1.0, _retry)
+        self._delivery_timer.daemon = True
+        self._delivery_timer.start()
+        logger.debug("suggestion_engine: delivery timer started")
+
+    def _on_cooldown_expired(self, reason: str, duration_s: float) -> None:
+        """Callback from CooldownManager when a cooldown expires."""
+        self._publish_lifecycle(CooldownExpired(
+            reason=reason,
+            duration_s=duration_s,
+            cycle_id=self._current_cycle_id,
+            timestamp=time.time(),
+        ))
+        logger.info(
+            "suggestion_engine: cooldown expired (reason=%s, duration=%.0fs)",
+            reason, duration_s,
+        )
+
+    def _on_cooldown_started(self, reason: str, duration_s: float) -> None:
+        """Publish a cooldown_started event."""
+        self._publish_lifecycle(CooldownStarted(
+            reason=reason,
+            duration_s=duration_s,
+            cycle_id=self._current_cycle_id,
+            timestamp=time.time(),
+        ))
+
+    def _on_suppressed(self, suggestion_id: str, reason: str, cycle_id: str) -> None:
+        """Publish a suggestion_suppressed event and log."""
+        self._publish_lifecycle(SuggestionSuppressed(
+            suggestion_id=suggestion_id,
+            reason=reason,
+            cycle_id=cycle_id,
+            timestamp=time.time(),
+        ))
+        logger.debug(
+            "suggestion_engine: suppressed %s (%s)", suggestion_id[:8], reason
+        )
+
+    def _on_delayed(self, suggestion_id: str, reason: str, cycle_id: str) -> None:
+        """Publish a suggestion_delayed event and log."""
+        self._publish_lifecycle(SuggestionDelayed(
+            suggestion_id=suggestion_id,
+            reason=reason,
+            cycle_id=cycle_id,
+            timestamp=time.time(),
+        ))
+        logger.debug(
+            "suggestion_engine: delayed %s (%s)", suggestion_id[:8], reason
+        )
+
+    def _on_displayed(self, suggestion_id: str, message: str, cycle_id: str) -> None:
+        """Publish a suggestion_displayed event and log."""
+        self._publish_lifecycle(SuggestionDisplayed(
+            suggestion_id=suggestion_id,
+            message=message,
+            cycle_id=cycle_id,
+            timestamp=time.time(),
+        ))
+        logger.debug(
+            "suggestion_engine: displayed %s", suggestion_id[:8]
+        )
+
+    def _store_and_display(self, suggestion: Suggestion, cycle_id: str) -> None:
+        """Store the suggestion and mark it as displayed."""
+        with self._lock:
+            if self._pending is not None:
+                return  # Someone beat us to it
+            self._pending = suggestion
+            self._current_cycle_id = cycle_id
+            self._delivery_pending = False
+
+        self._metrics.on_created()
+        self._on_displayed(suggestion.id, suggestion.message, cycle_id)
         self._publish_lifecycle(SuggestionCreated(
-            suggestion_id=old_id,
-            provider=provider_name,
+            suggestion_id=suggestion.id,
+            provider=suggestion.provider,
             title=suggestion.title,
-            confidence=confidence,
+            confidence=suggestion.confidence,
             cycle_id=cycle_id,
             timestamp=time.time(),
         ))
         logger.debug(
             "suggestion_engine: created %s via %s",
-            old_id,
-            provider_name,
+            suggestion.id,
+            suggestion.provider,
         )
+
+    def _cancel_delivery_timer(self) -> None:
+        """Cancel any pending delivery timer."""
+        if self._delivery_timer is not None:
+            self._delivery_timer.cancel()
+            self._delivery_timer = None
 
     @staticmethod
     def _safe(fn: Optional[Callable[[], Any]]) -> Any:
@@ -320,12 +516,21 @@ class SuggestionEngine:
             cycle_id = self._current_cycle_id
             snapshot = replace(asked)
 
+        self._cancel_delivery_timer()
+        self._metrics.on_shown()
+        self._cooldown.on_displayed(snapshot.message)
+
         self._publish_lifecycle(SuggestionAsked(
             suggestion_id=snapshot.id,
             message=snapshot.message,
             cycle_id=cycle_id,
             timestamp=time.time(),
         ))
+        logger.debug(
+            "suggestion_engine: asked %s (message=%r)",
+            snapshot.id,
+            snapshot.message[:80],
+        )
         return snapshot
 
     def accept(self) -> Optional[Suggestion]:
@@ -342,6 +547,17 @@ class SuggestionEngine:
             self._pending = None
             cycle_id = self._current_cycle_id
             self._current_cycle_id = ""
+
+        self._cancel_delivery_timer()
+        self._cooldown.on_accepted()
+        self._metrics.on_accepted()
+        # Publish cooldown_started event
+        try:
+            from config import settings as _s
+            accept_duration = float(getattr(_s, "SUGGESTION_COOLDOWN_AFTER_ACCEPT_S", 1200))
+        except Exception:
+            accept_duration = 1200.0
+        self._on_cooldown_started(reason="accept", duration_s=accept_duration)
 
         self._publish_lifecycle(SuggestionAccepted(
             suggestion_id=accepted.id,
@@ -369,6 +585,17 @@ class SuggestionEngine:
             self._pending = None
             self._current_cycle_id = ""
 
+        self._cancel_delivery_timer()
+        self._cooldown.on_declined()
+        self._metrics.on_declined()
+        # Publish cooldown_started event
+        try:
+            from config import settings as _s
+            decline_duration = float(getattr(_s, "SUGGESTION_COOLDOWN_AFTER_DECLINE_S", 600))
+        except Exception:
+            decline_duration = 600.0
+        self._on_cooldown_started(reason="decline", duration_s=decline_duration)
+
         self._publish_lifecycle(SuggestionDeclined(
             suggestion_id=declined.id,
             reason="user_declined",
@@ -394,6 +621,9 @@ class SuggestionEngine:
             old_id = self._pending.id
             self._pending = None
             self._current_cycle_id = ""
+
+        self._cancel_delivery_timer()
+        self._metrics.on_expired()
 
         self._publish_lifecycle(SuggestionExpired(
             suggestion_id=old_id,
@@ -434,3 +664,21 @@ class SuggestionEngine:
         """The cycle_id of the currently-pending Suggestion, or empty."""
         with self._lock:
             return self._current_cycle_id
+
+    # ------------------------------------------------------------------ #
+    # Sprint 2: Metrics & introspection                                   #
+    # ------------------------------------------------------------------ #
+
+    def get_session_metrics(self) -> dict:
+        """Return a snapshot of session-level suggestion metrics.
+
+        Returns:
+            Dict with keys: suggestions_created, suggestions_shown,
+            accepted, declined, expired, suppressed_cooldown,
+            suppressed_duplicate, suppressed_other, cooldown_reason.
+        """
+        return self._metrics.get_session_metrics()
+
+    def get_cooldown_info(self) -> dict:
+        """Return current cooldown state."""
+        return self._cooldown.get_cooldown_info()

@@ -34,6 +34,7 @@ class Settings:
 
     # --- TTS ---
     TTS_VOICE: str = os.getenv("TTS_VOICE", "en-GB-RyanNeural")
+    TTS_VOICE_ID: str = os.getenv("TTS_VOICE_ID", "bf_vale")  # Kokoro voice ID
     TTS_RATE: str = os.getenv("TTS_RATE", "+0%")
     TTS_PITCH: str = os.getenv("TTS_PITCH", "+0Hz")
 
@@ -47,6 +48,14 @@ class Settings:
     PROACTIVITY_ENABLED: bool = os.getenv("PROACTIVITY_ENABLED", "true").lower() == "true"
     PROACTIVITY_TICK_MINUTES: int = int(os.getenv("PROACTIVITY_TICK_MINUTES", "15"))
     REFLECTION_INTERVAL_HOURS: int = int(os.getenv("REFLECTION_INTERVAL_HOURS", "6"))
+
+    # --- Suggestion Cooldowns (seconds) ---
+    SUGGESTION_COOLDOWN_AFTER_DECLINE_S: int = int(os.getenv("SUGGESTION_COOLDOWN_AFTER_DECLINE_S", "600"))   # 10 minutes
+    SUGGESTION_COOLDOWN_AFTER_ACCEPT_S: int = int(os.getenv("SUGGESTION_COOLDOWN_AFTER_ACCEPT_S", "1200"))  # 20 minutes
+    SUGGESTION_DUPLICATE_WINDOW_S: int = int(os.getenv("SUGGESTION_DUPLICATE_WINDOW_S", "300"))              # 5 minutes
+
+    # --- Activity Awareness ---
+    ACTIVITY_QUIET_THRESHOLD_S: float = float(os.getenv("ACTIVITY_QUIET_THRESHOLD_S", "2.0"))  # seconds of inactivity before showing
 
     # --- Cognitive Logging ---
     ENABLE_COGNITIVE_LOGGING: bool = os.getenv("ENABLE_COGNITIVE_LOGGING", "true").lower() == "true"

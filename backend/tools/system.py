@@ -64,6 +64,17 @@ COMMON_APPS = {
     "pycharm":      ["pycharm64.exe", "pycharm.exe"],
     "intellij":     ["idea64.exe", "idea.exe"],
     "git bash":     ["C:/Program Files/Git/git-bash.exe"],
+    # Web destinations — opened in default browser
+    "youtube":      ["https://www.youtube.com"],
+    "google":       ["https://www.google.com"],
+    "gmail":        ["https://mail.google.com"],
+    "chatgpt":      ["https://chat.openai.com"],
+    "github":       ["https://github.com"],
+    "linkedin":     ["https://www.linkedin.com"],
+    "reddit":       ["https://www.reddit.com"],
+    "stackoverflow":["https://stackoverflow.com"],
+    "x":            ["https://x.com"],
+    "twitter":      ["https://x.com"],
 }
 
 
@@ -80,8 +91,11 @@ def _resolve_app_name(name: str) -> list[str]:
 
 
 def _find_exe(candidates: list[str]) -> Optional[str]:
-    """Pick the first candidate that exists in PATH or is an absolute path."""
+    """Pick the first candidate that exists in PATH or is an absolute path.
+    Also pass through URLs (http/https) so web destinations work end-to-end."""
     for c in candidates:
+        if c.startswith(("http://", "https://")):
+            return c
         if os.path.isabs(c) and os.path.exists(c):
             return c
         found = shutil.which(c)
@@ -111,21 +125,32 @@ async def open_app(name: str) -> dict[str, Any]:
 
 
 def execute_open_app(target: str) -> dict[str, Any]:
-    """Actually launch the .exe in a detached process."""
+    """Launch the target. If it's a URL, open in browser; otherwise launch the exe."""
     try:
+        if target.startswith(("http://", "https://")):
+            import webbrowser
+            webbrowser.open(target)
+            return {"ok": True, "message": f"Opened {target}", "method": "browser"}
+
         if target.lower().endswith("ms-settings:"):
             os.startfile(target)
-        else:
-            subprocess.Popen(
-                [target],
-                shell=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True,
-            )
-        return {"ok": True, "message": f"Launched {target}"}
+            return {"ok": True, "message": f"Opened {target}", "method": "settings"}
+
+        proc = subprocess.Popen(
+            [target],
+            shell=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        time.sleep(0.3)
+        rc = proc.poll()
+        if rc is not None and rc != 0:
+            return {"ok": False, "error": f"Process exited with code {rc}",
+                    "target": target}
+        return {"ok": True, "message": f"Opened {target}", "pid": proc.pid, "method": "exe"}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "target": target}
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,22 @@ backend/.venv/
 # Environment Variables
 # ------------------------
 .env
-backend/.env
+backend/.envsuggestion/providers.py — Provider message text completely rewritten using SuggestionMessenger
+suggestion/engine.py — Full Sprint 2 integration (cooldown gating, duplicate suppression, activity-aware delivery delays, metrics instrumentation, lifecycle events)
+observability/cognitive_logger.py — Extended with suggestion lifecycle, cooldown, and activity events
+test_sprint2.py — 35 comprehensive tests covering all Sprint 2 features
+config.py — Suggestion cooldown configuration values
+Architecture
+
+CooldownManager    ActivityMonitor    SuggestionMetrics
+        \               |                  /
+         \              |                 /
+          → SuggestionEngine (orchestrator) ←
+                     |
+              Providers (GeneralDevelopmentProvider)
+                     |
+              SuggestionMessenger (context-aware text)
+JARVIS 3.0's Operating Intelligence layer now has a fully operational, test-validated suggestion engine that builds on the stable Reactive Engine without touching any existing voice/command infrastructure.
 
 # ------------------------
 # Logs

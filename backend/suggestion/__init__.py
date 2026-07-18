@@ -11,24 +11,37 @@ It never names or calls any LLM.  It only prepares structured
 pick up.
 
 Public surface:
-    SuggestionEngine       — RuntimeService implementation
-    SuggestionProvider     — Abstract base class for providers
+    SuggestionEngine           — RuntimeService implementation
+    SuggestionProvider         — Abstract base class for providers
     GeneralDevelopmentProvider — First built-in provider (dev context)
-    Suggestion             — Dataclass for one Suggestion
-    PreparedRequest        — Structured payload for future LLM execution
-    SuggestionStatus       — Enum: PENDING / ASKED / ACCEPTED / DECLINED / EXPIRED
+    CooldownManager            — Tracks suggestion cooldown periods
+    ActivityMonitor            — Tracks user input activity
+    SuggestionMessenger        — Builds contextual messages and reasons
+    SuggestionMetricsTracker   — Session-level suggestion counters
+    Suggestion                 — Dataclass for one Suggestion
+    PreparedRequest            — Structured payload for future LLM execution
+    SuggestionStatus           — Enum: PENDING / ASKED / ACCEPTED / DECLINED / EXPIRED
 """
 from __future__ import annotations
 
+from .activity import ActivityMonitor
+from .cooldown import CooldownManager
 from .engine import SuggestionEngine
 from .events import (
+    CooldownExpired,
+    CooldownStarted,
     SuggestionAccepted,
     SuggestionAsked,
     SuggestionCleared,
     SuggestionCreated,
     SuggestionDeclined,
+    SuggestionDelayed,
+    SuggestionDisplayed,
     SuggestionExpired,
+    SuggestionSuppressed,
 )
+from .messenger import build_message, build_reason, build_suggestion_text
+from .metrics import SuggestionMetricsTracker
 from .models import (
     PreparedRequest,
     Suggestion,
@@ -40,16 +53,33 @@ from .providers import (
 )
 
 __all__ = [
+    # Engine
     "SuggestionEngine",
+    # Providers
     "SuggestionProvider",
     "GeneralDevelopmentProvider",
+    # Services
+    "CooldownManager",
+    "ActivityMonitor",
+    "SuggestionMetricsTracker",
+    # Messenger
+    "build_message",
+    "build_reason",
+    "build_suggestion_text",
+    # Models
     "Suggestion",
     "PreparedRequest",
     "SuggestionStatus",
+    # Events
     "SuggestionCreated",
     "SuggestionAsked",
     "SuggestionAccepted",
     "SuggestionDeclined",
     "SuggestionExpired",
     "SuggestionCleared",
+    "SuggestionSuppressed",
+    "SuggestionDelayed",
+    "SuggestionDisplayed",
+    "CooldownStarted",
+    "CooldownExpired",
 ]

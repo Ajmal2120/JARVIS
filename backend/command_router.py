@@ -98,7 +98,10 @@ def _execute_intent(intent: dict) -> Optional[CommandResult]:
             plan = asyncio.run(open_app(intent_target))
             if plan.get("ok"):
                 result = execute_open_app(plan["target"])
-                response_text = result.get("message", f"Opened {intent_target}, Sir.")
+                if result.get("ok"):
+                    response_text = result.get("message", f"Opened {intent_target}, Sir.")
+                else:
+                    response_text = result.get("error", f"Could not open {intent_target}")
             else:
                 response_text = plan.get("error", f"Could not open {intent_target}")
         elif intent_type == 'media':
@@ -206,7 +209,30 @@ async def route_command(user_id: str = "default", command: str = "") -> CommandR
 
 
 # ---------------------------------------------------------------------------
-# Synchronous wrapper for non-async contexts (e.g., jarvis_embedded.py)
+# Loop-aware synchronous wrapper for jarvis_embedded.py
+# ---------------------------------------------------------------------------
+
+def route_command_via_loop(command: str, loop: asyncio.AbstractEventLoop, timeout: float = 60) -> CommandResult:
+    """Submit route_command to an existing event loop and wait for result.
+
+    Avoids the overhead of route_command_sync() which creates a new
+    ThreadPoolExecutor + asyncio.run() per call.
+    """
+    try:
+        future = asyncio.run_coroutine_threadsafe(route_command("default", command), loop)
+        return future.result(timeout=timeout)
+    except Exception as e:
+        logger.error(f"route_command_via_loop failed: {e}")
+        return CommandResult(
+            reply="I encountered an error processing your command, Sir.",
+            mood="neutral",
+            tools_used=[],
+            local_executed=False
+        )
+
+
+# ---------------------------------------------------------------------------
+# Synchronous wrapper for non-async contexts (kept for compatibility)
 # ---------------------------------------------------------------------------
 
 def route_command_sync(user_id: str = "default", command: str = "") -> CommandResult:

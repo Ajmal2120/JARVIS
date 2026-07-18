@@ -315,6 +315,46 @@ class CognitiveLogger:
             self.suggestion_event(
                 action="Expired",
                 suggestion_id=getattr(event, "suggestion_id", ""),
+                age_s=getattr(event, "age_s", 0.0),
+                cycle_id=cycle_id,
+            )
+            return
+
+        # Sprint 2: suppression and delay
+        if event_type == "suggestion_suppressed":
+            self.suggestion_suppressed(
+                suggestion_id=getattr(event, "suggestion_id", ""),
+                reason=getattr(event, "reason", ""),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "suggestion_delayed":
+            self.suggestion_delayed(
+                suggestion_id=getattr(event, "suggestion_id", ""),
+                reason=getattr(event, "reason", ""),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "suggestion_displayed":
+            self.suggestion_displayed(
+                suggestion_id=getattr(event, "suggestion_id", ""),
+                message=getattr(event, "message", ""),
+                cycle_id=cycle_id,
+            )
+            return
+
+        # Sprint 2: cooldown events
+        if event_type == "cooldown_started":
+            self.cooldown_started(
+                reason=getattr(event, "reason", ""),
+                duration_s=getattr(event, "duration_s", 0.0),
+                cycle_id=cycle_id,
+            )
+            return
+        if event_type == "cooldown_expired":
+            self.cooldown_expired(
+                reason=getattr(event, "reason", ""),
+                duration_s=getattr(event, "duration_s", 0.0),
                 cycle_id=cycle_id,
             )
             return
@@ -590,14 +630,72 @@ class CognitiveLogger:
         provider: str = "",
         confidence: float = 0.0,
         message: str = "",
+        age_s: float = 0.0,
         cycle_id: str = "",
     ) -> None:
         """Log a Suggestion event (created / asked / accepted / declined / expired)."""
-        self._log("Suggestion", f"Suggestion {action}" if action else "Suggestion", {
+        details = {
             "suggestion_id": suggestion_id,
             "provider": provider,
             "confidence": confidence,
             "message": message,
+            "cycle_id": cycle_id,
+        }
+        if age_s:
+            details["age_s"] = age_s
+        self._log("Suggestion", f"Suggestion {action}" if action else "Suggestion", details)
+
+    # ------------------------------------------------------------------ #
+    # Sprint 2: suppression, delay, display, cooldown                     #
+    # ------------------------------------------------------------------ #
+
+    def suggestion_suppressed(
+        self, suggestion_id: str = "", reason: str = "", cycle_id: str = "",
+    ) -> None:
+        """Log a suppressed suggestion (cooldown / duplicate)."""
+        self._log("Suggestion", "Suggestion Suppressed", {
+            "suggestion_id": suggestion_id,
+            "reason": reason,
+            "cycle_id": cycle_id,
+        })
+
+    def suggestion_delayed(
+        self, suggestion_id: str = "", reason: str = "", cycle_id: str = "",
+    ) -> None:
+        """Log a delayed suggestion (user activity)."""
+        self._log("Suggestion", "Suggestion Delayed", {
+            "suggestion_id": suggestion_id,
+            "reason": reason,
+            "cycle_id": cycle_id,
+        })
+
+    def suggestion_displayed(
+        self, suggestion_id: str = "", message: str = "", cycle_id: str = "",
+    ) -> None:
+        """Log a displayed suggestion."""
+        self._log("Suggestion", "Suggestion Displayed", {
+            "suggestion_id": suggestion_id,
+            "message": message,
+            "cycle_id": cycle_id,
+        })
+
+    def cooldown_started(
+        self, reason: str = "", duration_s: float = 0.0, cycle_id: str = "",
+    ) -> None:
+        """Log a cooldown start."""
+        self._log("Suggestion", "Cooldown Started", {
+            "reason": reason,
+            "duration_s": duration_s,
+            "cycle_id": cycle_id,
+        })
+
+    def cooldown_expired(
+        self, reason: str = "", duration_s: float = 0.0, cycle_id: str = "",
+    ) -> None:
+        """Log a cooldown expiry."""
+        self._log("Suggestion", "Cooldown Expired", {
+            "reason": reason,
+            "duration_s": duration_s,
             "cycle_id": cycle_id,
         })
 

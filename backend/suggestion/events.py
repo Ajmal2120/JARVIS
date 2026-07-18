@@ -100,3 +100,58 @@ class SuggestionCleared(RuntimeEvent):
     suggestion_id: str = ""
     cycle_id: str = ""
     timestamp: float = 0.0
+
+
+@dataclass(frozen=True)
+class SuggestionSuppressed(RuntimeEvent):
+    """Emitted when a suggestion is suppressed (cooldown, duplicate, etc.)."""
+
+    type: str = "suggestion_suppressed"
+    suggestion_id: str = ""
+    reason: str = ""          # e.g. "cooldown", "duplicate", "delayed"
+    cycle_id: str = ""
+    timestamp: float = 0.0
+
+
+@dataclass(frozen=True)
+class SuggestionDelayed(RuntimeEvent):
+    """Emitted when a suggestion is delayed due to user activity."""
+
+    type: str = "suggestion_delayed"
+    suggestion_id: str = ""
+    reason: str = ""          # e.g. "user_typing"
+    cycle_id: str = ""
+    timestamp: float = 0.0
+
+
+@dataclass(frozen=True)
+class SuggestionDisplayed(RuntimeEvent):
+    """Emitted when a suggestion is actually displayed to the user."""
+
+    type: str = "suggestion_displayed"
+    suggestion_id: str = ""
+    message: str = ""
+    cycle_id: str = ""
+    timestamp: float = 0.0
+
+
+@dataclass(frozen=True)
+class CooldownStarted(RuntimeEvent):
+    """Emitted when a cooldown period starts."""
+
+    type: str = "cooldown_started"
+    reason: str = ""          # e.g. "accept", "decline"
+    duration_s: float = 0.0
+    cycle_id: str = ""
+    timestamp: float = 0.0
+
+
+@dataclass(frozen=True)
+class CooldownExpired(RuntimeEvent):
+    """Emitted when a cooldown period expires."""
+
+    type: str = "cooldown_expired"
+    reason: str = ""
+    duration_s: float = 0.0
+    cycle_id: str = ""
+    timestamp: float = 0.0
