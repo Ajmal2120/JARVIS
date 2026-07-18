@@ -1,0 +1,49 @@
+{
+  "total": 20,
+  "accepted": 0,
+  "rejected": 20,
+  "rejection_rate": 1.0,
+  "avg_latency_ms": 0.0,
+  "avg_stt_inference_ms": 0.0,
+  "avg_wer": 0.0,
+  "avg_cer": 0.0,
+  "confs": [],
+  "avg_confidence": 0.0,
+  "by_category": {
+    "short_command": [
+      "BenchmarkResult(utterance_id='s01', category='short_command', expected='Open Chrome', recognized='', audio_duration_s=0.88, audio_file='benchmarks\\\\output\\\\dataset\\\\s01.wav', wake_to_listen_ms=0.0, stt_inference_ms=63.91210001311265, end_to_end_ms=63.91210001311265, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s02', category='short_command', expected='Close Chrome', recognized='', audio_duration_s=0.96, audio_file='benchmarks\\\\output\\\\dataset\\\\s02.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.5169000000460073, end_to_end_ms=2.5169000000460073, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s03', category='short_command', expected='Mute', recognized='', audio_duration_s=0.5, audio_file='benchmarks\\\\output\\\\dataset\\\\s03.wav', wake_to_listen_ms=0.0, stt_inference_ms=1.7063999985111877, end_to_end_ms=1.7063999985111877, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s04', category='short_command', expected='Stop', recognized='', audio_duration_s=0.5, audio_file='benchmarks\\\\output\\\\dataset\\\\s04.wav', wake_to_listen_ms=0.0, stt_inference_ms=1.684399991063401, end_to_end_ms=1.684399991063401, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s05', category='short_command', expected='Volume up', recognized='', audio_duration_s=0.72, audio_file='benchmarks\\\\output\\\\dataset\\\\s05.wav', wake_to_listen_ms=0.0, stt_inference_ms=1.9959000055678189, end_to_end_ms=1.9959000055678189, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s06', category='short_command', expected='Volume down', recognized='', audio_duration_s=0.88, audio_file='benchmarks\\\\output\\\\dataset\\\\s06.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.142700002877973, end_to_end_ms=2.142700002877973, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s07', category='short_command', expected='Analyze screen', recognized='', audio_duration_s=1.12, audio_file='benchmarks\\\\output\\\\dataset\\\\s07.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.4987999931909144, end_to_end_ms=2.4987999931909144, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s08', category='short_command', expected='What time is it', recognized='', audio_duration_s=1.2, audio_file='benchmarks\\\\output\\\\dataset\\\\s08.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.511599988793023, end_to_end_ms=2.511599988793023, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s09', category='short_command', expected='Take a screenshot', recognized='', audio_duration_s=1.36, audio_file='benchmarks\\\\output\\\\dataset\\\\s09.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.7751000015996397, end_to_end_ms=2.7751000015996397, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='s10', category='short_command', expected='Lock the screen', recognized='', audio_duration_s=1.2, audio_file='benchmarks\\\\output\\\\dataset\\\\s10.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.835200008121319, end_to_end_ms=2.835200008121319, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')"
+    ],
+    "long_command": [
+      "BenchmarkResult(utterance_id='l01', category='long_command', expected=\"Analyze my current screen and summarize what I'm working on\", recognized='', audio_duration_s=4.72, audio_file='benchmarks\\\\output\\\\dataset\\\\l01.wav', wake_to_listen_ms=0.0, stt_inference_ms=8.174599992344156, end_to_end_ms=8.174599992344156, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='l02', category='long_command', expected='Can you explain the code currently open in Visual Studio Code', recognized='', audio_duration_s=4.88, audio_file='benchmarks\\\\output\\\\dataset\\\\l02.wav', wake_to_listen_ms=0.0, stt_inference_ms=7.096400004229508, end_to_end_ms=7.096400004229508, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='l03', category='long_command', expected='Search the web for the latest AI news', recognized='', audio_duration_s=2.96, audio_file='benchmarks\\\\output\\\\dataset\\\\l03.wav', wake_to_listen_ms=0.0, stt_inference_ms=5.110199999762699, end_to_end_ms=5.110199999762699, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='l04', category='long_command', expected='Open the file manager and navigate to the documents folder', recognized='', audio_duration_s=4.64, audio_file='benchmarks\\\\output\\\\dataset\\\\l04.wav', wake_to_listen_ms=0.0, stt_inference_ms=6.599500004085712, end_to_end_ms=6.599500004085712, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')",
+      "BenchmarkResult(utterance_id='l05', category='long_command', expected='Create a new folder on the desktop called project files', recognized='', audio_duration_s=4.4, audio_file='benchmarks\\\\output\\\\dataset\\\\l05.wav', wake_to_listen_ms=0.0, stt_inference_ms=6.385400003637187, end_to_end_ms=6.385400003637187, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')"
+    ],
+    "quiet_speech": [
+      "BenchmarkResult(utterance_id='v01', category='quiet_speech', expected='Open Chrome', recognized='', audio_duration_s=0.88, audio_file='benchmarks\\\\output\\\\dataset\\\\v01.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.4760999949648976, end_to_end_ms=2.4760999949648976, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')"
+    ],
+    "fast_speech": [
+      "BenchmarkResult(utterance_id='v02', category='fast_speech', expected='Close Chrome', recognized='', audio_duration_s=0.96, audio_file='benchmarks\\\\output\\\\dataset\\\\v02.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.7756999916164204, end_to_end_ms=2.7756999916164204, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')"
+    ],
+    "slow_speech": [
+      "BenchmarkResult(utterance_id='v03', category='slow_speech', expected='Mute', recognized='', audio_duration_s=0.5, audio_file='benchmarks\\\\output\\\\dataset\\\\v03.wav', wake_to_listen_ms=0.0, stt_inference_ms=1.8105000053765252, end_to_end_ms=1.8105000053765252, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')"
+    ],
+    "accent": [
+      "BenchmarkResult(utterance_id='v04', category='accent', expected='Volume up', recognized='', audio_duration_s=0.72, audio_file='benchmarks\\\\output\\\\dataset\\\\v04.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.259999993839301, end_to_end_ms=2.259999993839301, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')"
+    ],
+    "long_pause": [
+      "BenchmarkResult(utterance_id='v05', category='long_pause', expected='Analyze screen', recognized='', audio_duration_s=1.12, audio_file='benchmarks\\\\output\\\\dataset\\\\v05.wav', wake_to_listen_ms=0.0, stt_inference_ms=2.784099997370504, end_to_end_ms=2.784099997370504, wer=1.0, cer=1.0, confidence=0.0, vad_decision='accepted', silence_detected_ms=0.0, accepted=False, error='')"
+    ]
+  },
+  "timestamp": "2026-07-19T00:00:55.779439"
+}
