@@ -33,14 +33,13 @@ CHUNK_SIZE = 8000  # 0.5s at 16kHz
 # ---------------------------------------------------------------------------
 
 # Minimum speech duration before transcribing (prevents false positives)
-MIN_SPEECH_SAMPLES = int(1.0 * SAMPLE_RATE)  # 1.0s - lowered for faster response
+MIN_SPEECH_SAMPLES = int(0.5 * SAMPLE_RATE)  # 0.5s - enough for short commands
 
-# Silence duration that ends an utterance (reduced for quicker response)
-MAX_SILENCE_SAMPLES = int(0.8 * SAMPLE_RATE)  # 0.8s - lowered from 1.2s
+# Silence duration that ends an utterance
+MAX_SILENCE_SAMPLES = int(0.6 * SAMPLE_RATE)  # 0.6s - responsive but not jumpy
 
 # RMS threshold below which audio is considered silence.
-# Tuned for typical laptop microphone. Music/songs below this are ignored.
-SILENCE_THRESHOLD = 0.015
+SILENCE_THRESHOLD = 0.008  # lowered to catch quiet/soft speech
 
 # RMS threshold above which audio is considered loud (music/tv/etc)
 # Audio above this threshold clears the buffer to prevent false triggers.
@@ -51,9 +50,9 @@ LOUD_THRESHOLD = 0.2
 # ---------------------------------------------------------------------------
 
 # Beam size for decoding.
-# 1 = fastest, identical accuracy for clear speech.
-# Higher values add latency with diminishing returns on CPU.
-BEAM_SIZE = 1
+# 3 = good accuracy with acceptable latency on CPU.
+# 1 = fastest but misses words, especially with accents.
+BEAM_SIZE = 3
 
 # Language for transcription.
 # Set to "en" for English-only, None for auto-detect.
@@ -292,13 +291,17 @@ def _transcribe_audio(audio_array: np.ndarray):
             audio_array,
             language=_language,
             beam_size=BEAM_SIZE,
-            vad_filter=False,  # Custom RMS detector used instead
+            vad_filter=True,  # Use whisper's built-in VAD for accurate speech detection
+            vad_parameters=dict(
+                min_silence_duration_ms=300,
+                speech_pad_ms=200,
+            ),
             without_timestamps=True,
         )
 
         text_parts = []
         for segment in segments:
-            if segment.no_speech_prob > 0.8:
+            if segment.no_speech_prob > 0.9:
                 continue
             text = segment.text.strip()
             if text:
